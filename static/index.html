@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>llama-webui</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h1>llama-webui</h1>
+          <button id="new-chat">New Chat</button>
+        </div>
+        <div class="server-strip">
+          <span id="server-indicator" class="badge offline">offline</span>
+          <button id="start-server">Start</button>
+          <button id="stop-server">Stop</button>
+        </div>
+        <div id="chat-list" class="chat-list"></div>
+      </aside>
+
+      <main class="main-panel">
+        <section class="settings-panel">
+          <h2>Server & Inference</h2>
+          <div class="form-grid compact-settings">
+            <label>model path<input id="model_path" /></label>
+            <label>candidate models<select id="candidate_models"></select></label>
+            <label>model presets<select id="model_presets"></select></label>
+            <label>temperature<input id="temperature" type="number" step="0.01" /></label>
+            <label>top p<input id="top_p" type="number" step="0.01" /></label>
+            <label>top k<input id="top_k" type="number" /></label>
+            <label>max tokens<input id="max_tokens" type="number" /></label>
+          </div>
+          <div class="actions">
+            <button id="save-config">Save Config</button>
+            <button id="apply-model-preset">Apply Preset</button>
+            <button id="load-model-preset">Load Preset</button>
+            <span id="status-text"></span>
+          </div>
+          <details class="settings-collapse">
+            <summary>Advanced Runtime</summary>
+            <div class="form-grid advanced-settings">
+              <label>llama binary<input id="llama_binary" /></label>
+              <label>cpu mask<input id="cpu_mask" placeholder="4-7" /></label>
+              <label>llama host<input id="llama_host" /></label>
+              <label>llama port<input id="llama_port" type="number" /></label>
+              <label>ctx size<input id="ctx_size" type="number" /></label>
+              <label>threads<input id="threads" type="number" /></label>
+              <label>gpu layers<input id="gpu_layers" type="number" /></label>
+              <label>parallel<input id="parallel" type="number" /></label>
+              <label>batch size<input id="batch_size" type="number" /></label>
+              <label>ubatch size<input id="ubatch_size" type="number" /></label>
+              <label>min p<input id="min_p" type="number" step="0.01" /></label>
+              <label>repeat penalty<input id="repeat_penalty" type="number" step="0.01" /></label>
+              <label>presence penalty<input id="presence_penalty" type="number" step="0.01" /></label>
+              <label class="full">custom args<input id="custom_args" /></label>
+              <label class="full">system prompt<textarea id="system_prompt" rows="3"></textarea></label>
+            </div>
+          </details>
+          <div class="subpanel-grid">
+            <div class="subpanel">
+              <div class="subpanel-header">
+                <h3>Model Library</h3>
+                <div class="inline-actions">
+                  <button id="refresh-models">Refresh</button>
+                  <button id="load-selected-model">Load Selected</button>
+                </div>
+              </div>
+              <div id="model-library" class="model-library"></div>
+            </div>
+            <div class="subpanel">
+              <div class="subpanel-header">
+                <h3>Download GGUF</h3>
+              </div>
+              <div class="form-grid compact-grid">
+                <label class="full">url<input id="download_url" placeholder="https://huggingface.co/.../model.gguf?download=1" /></label>
+                <label class="full">destination path<input id="download_destination" placeholder="~/models/model.gguf" /></label>
+              </div>
+              <div class="actions">
+                <button id="start-download">Start Download</button>
+              </div>
+              <div id="download-jobs" class="download-jobs"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="chat-panel">
+          <div class="chat-header">
+            <div id="chat-title" class="chat-title">No chat selected</div>
+            <div class="chat-model-strip">
+              <span class="chat-model-label">Loaded Model</span>
+              <span id="loaded-model-name" class="chat-model-name">Unknown</span>
+              <span id="loaded-model-meta" class="chat-model-meta"></span>
+            </div>
+          </div>
+          <div id="messages" class="messages"></div>
+          <div class="preset-row">
+            <select id="prompt-presets"></select>
+            <button id="apply-preset">Use Preset</button>
+            <button id="run-preset">Run Preset</button>
+          </div>
+          <div class="composer">
+            <textarea id="message-input" rows="4" placeholder="Send a message..."></textarea>
+            <button id="send-message">Send</button>
+          </div>
+          <div class="chat-status-row">
+            <span id="chat-status-text"></span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/vendor/markdown-it.min.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
