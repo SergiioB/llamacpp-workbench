@@ -1,8 +1,47 @@
-.venv/
-__pycache__/
-*.pyc
-.DS_Store
+# Environment files
+.env
+.env.local
+.env.*.local
 
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE configs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project-specific
 data/*
 !data/.gitkeep
 
@@ -10,3 +49,7 @@ models/*
 !models/.gitkeep
 
 wget-log
+
+# Logs
+*.log
+logs/
