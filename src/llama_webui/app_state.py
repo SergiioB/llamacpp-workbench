@@ -8,13 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from .model_inventory import list_candidate_models, normalize_model_path
-from .settings import data_dir, resolve_llama_server_binary
+from .settings import GPU_BACKEND, data_dir, resolve_llama_server_binary
 
 
 def default_config() -> dict[str, Any]:
     candidates = list_candidate_models()
     detected_cpus = os.cpu_count() or 4
     cpu_threads = 4 if detected_cpus >= 8 else max(1, min(4, detected_cpus))
+    gpu_layers = 99 if GPU_BACKEND == "cuda" else 0
+    parallel = 4 if GPU_BACKEND == "cuda" else 1
+    batch_size = 512 if GPU_BACKEND == "cuda" else 128
+    ubatch_size = 128 if GPU_BACKEND == "cuda" else 32
     return {
         "bind_host": "0.0.0.0",
         "bind_port": 8095,
@@ -25,10 +29,10 @@ def default_config() -> dict[str, Any]:
         "cpu_mask": "4-7",
         "ctx_size": 2048,
         "threads": cpu_threads,
-        "gpu_layers": 0,
-        "parallel": 1,
-        "batch_size": 128,
-        "ubatch_size": 32,
+        "gpu_layers": gpu_layers,
+        "parallel": parallel,
+        "batch_size": batch_size,
+        "ubatch_size": ubatch_size,
         "temperature": 1.0,
         "top_p": 0.95,
         "top_k": 40,

@@ -38,6 +38,49 @@ That means the same repo can run on:
 - AMD ROCm hosts
 - Apple Silicon, if `llama.cpp` is built and available in the local environment
 
+## Auto-Detection
+
+The application auto-detects your GPU backend on startup:
+
+- **CUDA**: NVIDIA GPUs with `nvidia-smi` available
+- **ROCm**: AMD GPUs with ROCm support
+- **Metal**: Apple Silicon
+- **CPU**: Fallback when no GPU acceleration is detected
+
+The detected backend affects:
+- Default `gpu_layers` (99 for CUDA, 0 for CPU)
+- Default `parallel`, `batch_size`, `ubatch_size` values
+- Model presets shown in the UI
+- Build path priority for `llama-server` binary
+
+## Building llama.cpp
+
+### CUDA Build (NVIDIA)
+
+```bash
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp
+mkdir build-cuda && cd build-cuda
+cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build . --config Release -j$(nproc)
+# Binary ends up in: bin/llama-server
+```
+
+The application automatically prefers `third_party/llama.cpp/build-cuda/bin/llama-server` on CUDA systems.
+
+### CPU-only Build (RK3588 / ARM)
+
+```bash
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp
+mkdir build-rk-opt && cd build-rk-opt
+cmake .. -DGGML_CPU_VULKAN=ON -DGGML_CPU_BLAS=ON -DCMAKE_BUILD_TYPE=Release -march=armv8.2a+dotprod
+cmake --build . --config Release -j$(nproc)
+# Binary ends up in: bin/llama-server
+```
+
+The RK3588-optimized build uses Vulkan for GPU offload (Mali) and OpenBLAS for CPU acceleration.
+
 ## Practical Starting Profiles
 
 These are starting points, not validated final answers.
@@ -83,12 +126,27 @@ Use when:
 
 Starting point:
 
-- offload with `gpu_layers` high enough to keep the hot path on GPU
-- raise `batch_size` and `ubatch_size` compared with SBC defaults
+- offload with `gpu_layers=99` to keep the hot path on GPU
+- raise `parallel=4`, `batch_size=512`, `ubatch_size=256`
 - keep an eye on VRAM headroom before increasing context aggressively
 - retest context and max tokens once offload is stable
 
 On these machines, the best model may be very different from the ROCK 5B+ winner because the tradeoff changes from CPU throughput to VRAM fit and PCIe / host-device transfer behavior.
+
+### TurboQuant (TQ3_1S) on CUDA
+
+The [TurboQuant TQ3_1S format](https://github.com/turbo-tan/llama.cpp-tq3) enables 3.5-bit quantization that fits 27B models on 16GB GPUs:
+
+- TQ3_1S is ~10% smaller than Q4_0 with near-identical quality
+- Works on NVIDIA GPUs with CUDA support
+- See the [original tweet](https://x.com/coffeecup2020/status/2038725930626003140) for benchmarks
+
+To use TQ3_1S models:
+
+1. Build llama.cpp with TurboQuant support from the [fork](https://github.com/turbo-tan/llama.cpp-tq3)
+2. Download TQ3_1S quantized models from [HuggingFace](https://huggingface.co/YTan2000/Qwen3.5-27B-TQ3_1S)
+3. Place in your models directory
+4. Load via the web UI - the CUDA profile will handle it
 
 ### AMD / ROCm
 
@@ -118,7 +176,7 @@ Starting point:
 
 When porting this repo to another host, tune in this order:
 
-1. confirm `llama-server` and `llama-cli` paths
+1. confirm `llama-server` and `llama-cli` paths (see build scripts in `scripts/`)
 2. confirm model scanning and loading
 3. verify one short chat round-trip
 4. tune `gpu_layers`
