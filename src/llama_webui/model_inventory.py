@@ -6,7 +6,7 @@ from typing import Any, Callable
 from .settings import model_roots
 
 
-LEGACY_DEFAULT_MODEL_FILENAMES = {"qwen3.5-4b-q4_k_m.gguf"}
+LEGACY_DEFAULT_MODEL_FILENAMES: set[str] = set()
 
 
 def _name(model_path: str) -> str:
