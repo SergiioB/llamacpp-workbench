@@ -12,7 +12,12 @@ from pydantic import BaseModel
 from .app_state import AppState
 from .download_manager import ModelDownloadManager
 from .llama_manager import LlamaServerManager
-from .model_inventory import apply_model_profile, build_model_presets, list_candidate_models, scan_models
+from .model_inventory import (
+    apply_model_profile,
+    build_model_presets,
+    list_candidate_models,
+    scan_models,
+)
 from .settings import PROJECT_ROOT, STATIC_DIR, data_dir, default_download_dir
 
 state = AppState(PROJECT_ROOT)

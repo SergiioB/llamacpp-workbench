@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -11,7 +12,6 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-import re
 from typing import Any
 
 
@@ -117,6 +117,9 @@ class LlamaServerManager:
             "--batch-size", str(config["batch_size"]),
             "--ubatch-size", str(config["ubatch_size"]),
         ])
+        gpu_backend = str(config.get("gpu_backend") or "auto").strip()
+        if gpu_backend not in ("auto", ""):
+            args.extend([f"--{gpu_backend}"])
         if str(config.get("custom_args") or "").strip():
             args.extend(shlex.split(str(config["custom_args"])))
 

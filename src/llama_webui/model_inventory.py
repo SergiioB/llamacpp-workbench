@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from .settings import model_roots
-
+from .settings import GPU_BACKEND, model_roots
 
 LEGACY_DEFAULT_MODEL_FILENAMES: set[str] = set()
 
@@ -122,6 +122,9 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
     tuned = {**config, "model_path": model_path}
     lower = _name(model_path)
 
+    if GPU_BACKEND == "cuda":
+        return _cuda_profile_for_model(tuned, lower, model_path)
+
     if _is_glm_flash_reap(model_path):
         tuned.update(
             {
@@ -191,11 +194,131 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
     return tuned
 
 
+def _cuda_profile_for_model(config: dict[str, Any], lower: str, model_path: str) -> dict[str, Any]:
+    if _is_qwen_27b(model_path) or "27b" in lower:
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 32768,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 2048,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    if "72b" in lower or "70b" in lower:
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 8192,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 2048,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    if "35b" in lower or "34b" in lower or "32b" in lower:
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 16384,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 2048,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    if "18b" in lower or "17b" in lower or "14b" in lower or "13b" in lower:
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 32768,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 2048,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    if "9b" in lower or "8b" in lower or "7b" in lower:
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 32768,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 2048,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    if any(size_hint in lower for size_hint in ("4b", "3b", "2b", "1.7b", "0.8b")):
+        config.update(
+            {
+                "gpu_layers": 99,
+                "ctx_size": 65536,
+                "parallel": 4,
+                "batch_size": 512,
+                "ubatch_size": 256,
+                "max_tokens": 4096,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+            }
+        )
+        return config
+
+    config.update(
+        {
+            "gpu_layers": 99,
+            "parallel": 4,
+            "batch_size": 512,
+            "ubatch_size": 256,
+        }
+    )
+    return config
+
+
 def build_model_presets(defaults: dict[str, Any], candidates: list[str] | None = None) -> list[dict[str, Any]]:
     available = list(candidates or list_candidate_models())
     presets: list[dict[str, Any]] = []
     day_model = _find_matching_model(available, _is_day_qwen)
     night_model = _find_matching_model(available, _is_glm_flash_reap)
+
+    if GPU_BACKEND == "cuda":
+        cuda_large = _find_matching_model(available, lambda p: "27b" in p.lower() or "qwen" in p.lower())
+        if cuda_large:
+            presets.append(
+                {
+                    "id": "cuda-qwen-27b",
+                    "label": "CUDA Qwen 27B",
+                    "description": "High-quality CUDA profile for Qwen 27B on NVIDIA GPU.",
+                    "config": apply_model_profile(
+                        {
+                            **defaults,
+                            "temperature": 0.8,
+                            "top_p": 0.95,
+                            "top_k": 40,
+                            "min_p": 0.0,
+                            "repeat_penalty": 1.05,
+                            "presence_penalty": 0.0,
+                        },
+                        cuda_large,
+                    ),
+                }
+            )
+        return presets
 
     if day_model:
         presets.append(

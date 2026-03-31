@@ -65,7 +65,7 @@ Runtime artifacts under `data/`, downloaded models under `models/`, and local vi
 
 ## Quick Start
 
-1. Build or install `llama.cpp` so `llama-server` and `llama-cli` are available.
+1. Build `llama.cpp` (see [Building llama.cpp](#building-llamacpp) below).
 2. Download at least one GGUF into `./models`, `~/models`, or any directory listed in `LLAMA_WEBUI_MODEL_DIRS`.
 3. Install and run:
 
@@ -77,6 +77,51 @@ llama-webui
 ```
 
 Open `http://<host>:8095`.
+
+## Building llama.cpp
+
+### CUDA Build (NVIDIA GPU)
+
+```bash
+# Option 1: Use the build script
+./scripts/build_llama_cuda.sh
+
+# Option 2: Manual build
+git clone https://github.com/ggerganov/llama.cpp.git third_party/llama.cpp
+cd third_party/llama.cpp
+mkdir build-cuda && cd build-cuda
+cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_CLI=ON
+cmake --build . --config Release -j$(nproc)
+```
+
+The app automatically prefers `third_party/llama.cpp/build-cuda/bin/llama-server` on CUDA systems.
+
+### CPU-only / RK3588 Build
+
+```bash
+cd third_party/llama.cpp
+mkdir build-rk-opt && cd build-rk-opt
+cmake .. -DGGML_CPU_VULKAN=ON -DGGML_CPU_BLAS=ON -DCMAKE_BUILD_TYPE=Release -march=armv8.2a+dotprod
+cmake --build . --config Release -j$(nproc)
+```
+
+### TurboQuant (TQ3_1S) for 16GB GPUs
+
+[TurboQuant](https://github.com/turbo-tan/llama.cpp-tq3) enables 3.5-bit quantization to fit 27B models on 16GB GPUs:
+
+- ~10% smaller than Q4_0 with near-identical quality
+- See [original research](https://x.com/coffeecup2020/status/2038725930626003140)
+
+```bash
+git clone https://github.com/turbo-tan/llama.cpp-tq3.git third_party/llama.cpp-tq3
+cd third_party/llama.cpp-tq3
+mkdir build && cd build
+cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build . --config Release -j$(nproc)
+
+# Download pre-quantized model:
+# https://huggingface.co/YTan2000/Qwen3.5-27B-TQ3_1S
+```
 
 ## Configuration
 
@@ -138,6 +183,23 @@ What changes per machine is not the app architecture, but the runtime tuning:
 - custom `llama.cpp` flags
 
 See [docs/hardware-portability.md](./docs/hardware-portability.md) for starting profiles on non-RK3588 hardware.
+
+## GPU Backend Auto-Detection
+
+The app automatically detects your GPU backend on startup:
+
+| Backend | Detection | Default Settings |
+|---------|-----------|-----------------|
+| **CUDA** | `nvidia-smi` available | `gpu_layers=99`, `parallel=4`, `batch_size=512` |
+| **ROCm** | AMD GPU path | Same as CUDA profile |
+| **Metal** | Apple Silicon | Managed by llama.cpp |
+| **CPU** | Fallback | `gpu_layers=0`, `parallel=1`, `batch_size=128` |
+
+The detected backend affects:
+- Default `gpu_layers` (99 for CUDA/ROCm, 0 for CPU)
+- Default `parallel`, `batch_size`, `ubatch_size` values
+- Model presets shown in the UI
+- Build path priority for `llama-server` binary
 
 ## Models We Actually Tested
 

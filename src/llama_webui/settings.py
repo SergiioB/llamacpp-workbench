@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
-
+from typing import Literal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -13,6 +14,29 @@ def _split_paths(value: str | None) -> list[Path]:
     if not value:
         return []
     return [Path(part).expanduser() for part in value.split(os.pathsep) if part.strip()]
+
+
+def _has_nvidia_gpu() -> bool:
+    if os.path.exists("/proc/driver/nvidia"):
+        return True
+    try:
+        result = subprocess.run(["nvidia-smi", "-L"], capture_output=True, timeout=5)
+        return result.returncode == 0 and b"GPU" in result.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _detect_gpu_backend() -> Literal["cuda", "rocm", "metal", "cpu"]:
+    if _has_nvidia_gpu():
+        return "cuda"
+    if os.path.exists("/sys/kernel/mm/amd-tee"):
+        return "rocm"
+    if os.uname().machine.startswith("arm64") and os.path.exists("/System/Library/Extensions/AGL.framework"):
+        return "metal"
+    return "cpu"
+
+
+GPU_BACKEND: Literal["cuda", "rocm", "metal", "cpu"] = _detect_gpu_backend()
 
 
 def data_dir() -> Path:
@@ -60,22 +84,30 @@ def _resolve_binary(env_var: str, command_name: str, candidates: list[Path]) -> 
 
 
 def resolve_llama_server_binary() -> str:
-    return _resolve_binary(
-        "LLAMA_WEBUI_LLAMA_SERVER",
-        "llama-server",
-        [
+    candidates = [
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build" / "bin" / "llama-server",
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build-cuda" / "bin" / "llama-server",
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build-rk-opt" / "bin" / "llama-server",
+    ]
+    if GPU_BACKEND == "cuda":
+        cuda_first = [
+            PROJECT_ROOT / "third_party" / "llama.cpp" / "build-cuda" / "bin" / "llama-server",
             PROJECT_ROOT / "third_party" / "llama.cpp" / "build" / "bin" / "llama-server",
-            PROJECT_ROOT / "third_party" / "llama.cpp" / "build-rk-opt" / "bin" / "llama-server",
-        ],
-    )
+        ]
+        candidates = cuda_first + [c for c in candidates if c not in cuda_first]
+    return _resolve_binary("LLAMA_WEBUI_LLAMA_SERVER", "llama-server", candidates)
 
 
 def resolve_llama_cli_binary() -> str:
-    return _resolve_binary(
-        "LLAMA_WEBUI_LLAMA_CLI",
-        "llama-cli",
-        [
+    candidates = [
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build" / "bin" / "llama-cli",
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build-cuda" / "bin" / "llama-cli",
+        PROJECT_ROOT / "third_party" / "llama.cpp" / "build-rk-opt" / "bin" / "llama-cli",
+    ]
+    if GPU_BACKEND == "cuda":
+        cuda_first = [
+            PROJECT_ROOT / "third_party" / "llama.cpp" / "build-cuda" / "bin" / "llama-cli",
             PROJECT_ROOT / "third_party" / "llama.cpp" / "build" / "bin" / "llama-cli",
-            PROJECT_ROOT / "third_party" / "llama.cpp" / "build-rk-opt" / "bin" / "llama-cli",
-        ],
-    )
+        ]
+        candidates = cuda_first + [c for c in candidates if c not in cuda_first]
+    return _resolve_binary("LLAMA_WEBUI_LLAMA_CLI", "llama-cli", candidates)
