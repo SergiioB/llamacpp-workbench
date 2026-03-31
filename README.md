@@ -32,6 +32,7 @@ The longer-term goal is to serve a personalized `Qwen3.5-35B-A3B` REAP build der
 llama-webui/
 ├── README.md
 ├── REAP_RK3588_NOTES.md
+├── WINDOWS_SETUP.md              # Windows-specific setup instructions
 ├── pyproject.toml
 ├── .env.example
 ├── docs/
@@ -43,6 +44,10 @@ llama-webui/
 ├── data/
 │   └── .gitkeep
 ├── scripts/
+│   ├── build_llama_cuda.sh       # Linux/macOS CUDA build
+│   ├── build_llama_cuda.ps1      # Windows CUDA build
+│   ├── setup_windows.ps1         # Windows one-click setup
+│   ├── configure_env.ps1         # Windows environment configuration
 │   ├── reap_bakeoff.py
 │   ├── reap_benchmark.py
 │   ├── reap_status.sh
@@ -65,6 +70,8 @@ Runtime artifacts under `data/`, downloaded models under `models/`, and local vi
 
 ## Quick Start
 
+### Linux/macOS
+
 1. Build `llama.cpp` (see [Building llama.cpp](#building-llamacpp) below).
 2. Download at least one GGUF into `./models`, `~/models`, or any directory listed in `LLAMA_WEBUI_MODEL_DIRS`.
 3. Install and run:
@@ -76,11 +83,40 @@ uv pip install -e .
 llama-webui
 ```
 
+### Windows
+
+1. Run the setup script:
+
+```powershell
+# One-command setup (builds from source)
+.\scripts\setup_windows.ps1
+
+# Or use pre-built binaries (faster, no compilation)
+.\scripts\setup_windows.ps1 -UsePrebuilt
+```
+
+2. Configure environment (optional):
+
+```powershell
+.\scripts\configure_env.ps1 -CreateEnvFile
+```
+
+3. Run:
+
+```powershell
+.venv\Scripts\Activate.ps1
+llama-webui
+```
+
+See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed Windows instructions.
+
 Open `http://<host>:8095`.
 
 ## Building llama.cpp
 
 ### CUDA Build (NVIDIA GPU)
+
+#### Linux/macOS
 
 ```bash
 # Option 1: Use the build script
@@ -93,6 +129,26 @@ mkdir build-cuda && cd build-cuda
 cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_CLI=ON
 cmake --build . --config Release -j$(nproc)
 ```
+
+#### Windows
+
+```powershell
+# Option 1: One-click setup (recommended)
+.\scripts\setup_windows.ps1
+
+# Option 2: Use the build script only
+.\scripts\build_llama_cuda.ps1
+
+# Option 3: Use pre-built binaries (no compilation needed)
+.\scripts\setup_windows.ps1 -UsePrebuilt -CudaVersion 12.4
+```
+
+**Prerequisites for Windows build:**
+- Visual Studio 2022 Build Tools (with "Desktop development with C++" workload)
+- CUDA Toolkit 12.4 or later (12.8+ required for RTX 50-series)
+- CMake 3.18+
+
+See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed Windows setup instructions.
 
 The app automatically prefers `third_party/llama.cpp/build-cuda/bin/llama-server` on CUDA systems.
 
@@ -148,6 +204,7 @@ Default behavior without overrides:
 
 This repository was validated primarily on:
 
+### ARM/Embedded
 - board: `Radxa ROCK 5B+`
 - SoC: `Rockchip RK3588`
 - architecture: `aarch64`
@@ -159,6 +216,15 @@ This repository was validated primarily on:
 - swap enabled during testing: about `11 GiB`
 
 The detailed benchmark write-up is in [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md).
+
+### Windows Desktop/Laptop
+- OS: Windows 11
+- CPU: Intel Core Ultra 9 285H
+- GPU: NVIDIA GeForce RTX 5060 Laptop GPU + Intel Arc 140T GPU (dual GPU)
+- RAM: 32 GB
+- CUDA: 12.8+ (Blackwell architecture)
+
+See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for Windows-specific setup instructions.
 
 ## Hardware Scope
 
