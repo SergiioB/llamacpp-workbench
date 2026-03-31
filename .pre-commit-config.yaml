@@ -32,3 +32,13 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: detect-private-key
+
+  # Tech debt tracking - enforce TODO comments link to issues
+  - repo: local
+    hooks:
+      - id: check-tech-debt
+        name: Check tech debt links to issues
+        entry: python scripts/check_tech_debt.py
+        language: system
+        types: [python, javascript]
+        pass_filenames: true

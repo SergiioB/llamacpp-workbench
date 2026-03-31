@@ -129,6 +129,32 @@ For RK3588 boards, see `docs/rk3588-benchmarks.md` for tested configurations. Ke
 - Threads: 4
 - KV cache quantization: `--cache-type-k q8_0 --cache-type-v q4_0`
 
+## Tech Debt Tracking
+
+All TODO, FIXME, HACK, and XXX comments must link to GitHub issues for tracking.
+
+### Accepted Formats
+
+```python
+# TODO(#123) - link to issue by number in current repo
+# TODO(https://github.com/SergiioB/llamacpp-workbench/issues/123) - full URL
+# FIXME(#456) - same patterns apply for FIXME
+# HACK(#789) - same patterns apply for HACK
+```
+
+### Enforcement
+
+- Ruff's FIX rules detect TODO/FIXME/HACK/XXX comments
+- Pre-commit hook validates comments link to issues
+- Run manually: `python scripts/check_tech_debt.py`
+
+### Why This Matters
+
+Linking tech debt to issues ensures:
+- Work is tracked and prioritized
+- Agents can find related context when fixing issues
+- Technical debt doesn't accumulate silently
+
 ## Dependencies
 
 Main dependencies:
@@ -149,9 +175,10 @@ pre-commit install
 ```
 
 Hooks run automatically before commits:
-- ruff (linting + formatting)
+- ruff (linting + formatting + tech debt detection)
 - mypy (type checking)
 - check-added-large-files
 - detect-private-key
 - check-merge-conflict
 - trailing-whitespace fix
+- check-tech-debt (enforces TODO comments link to issues)
