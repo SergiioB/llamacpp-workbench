@@ -1,9 +1,25 @@
 [project]
 name = "llama-webui"
 version = "0.1.0"
-description = "Minimal local web UI for managing llama.cpp, chats, and inference settings."
+description = "Standalone local web UI for llama.cpp with persistent chats, model management, streaming responses, and hardware-aware runtime tuning."
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Sergio Barrientos", email = "sergio@sergiiob.dev"},
+]
+keywords = ["llama.cpp", "gguf", "local-llm", "edge-ai", "llm-inference", "rk3588", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",

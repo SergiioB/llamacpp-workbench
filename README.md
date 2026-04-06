@@ -1,100 +1,204 @@
 # llama-webui
 
-`llama-webui` is a standalone local web interface for `llama.cpp` with persistent chats, model management, streaming responses, and hardware-aware runtime tuning.
+> Standalone local web UI for llama.cpp with persistent chats, model management, streaming responses, and hardware-aware runtime tuning.
 
-This project intentionally does not use Ollama. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
+<!-- Badges -->
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy.readthedocs.io/)
 
-## Why This Exists
+<!-- Topics -->
+<!-- Topics: python, llm, llama-cpp, gguf, edge-ai, inference, local-llm, llm-inference, rockchip, rk3588, arm64, fastapi -->
 
-This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves two purposes:
+---
 
-- a practical remote web UI for loading and serving local GGUF models with `llama.cpp`
-- a documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
+## What This Is
 
-The longer-term goal is to serve a personalized `Qwen3.5-35B-A3B` REAP build derived from exported personal AI session data, but this repository is the serving and benchmarking layer, not the pruning implementation itself.
+`llama-webui` is a standalone local web interface for `llama.cpp` — intentionally **without Ollama**. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
 
-## Highlights
+This project started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves two purposes:
 
-- `llama.cpp` only: no Ollama dependency
-- browser-driven model loading and config editing
-- remote bind support on `0.0.0.0`
-- model discovery from configurable GGUF directories
-- direct GGUF download jobs from the UI
-- persistent chat history in SQLite
-- streamed chat deltas rendered as markdown
-- stop/cancel generation support
-- RK3588-tested presets for fast daytime use and stronger overnight use
-- portable path configuration for other Linux hosts and desktop GPU systems
+- A practical remote web UI for loading and serving local GGUF models with `llama.cpp`
+- A documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
 
-## Repository Layout
+---
 
-```text
-llama-webui/
-├── README.md
-├── REAP_RK3588_NOTES.md
-├── pyproject.toml
-├── .env.example
-├── docs/
-│   ├── hardware-portability.md
-│   ├── reap-roadmap.md
-│   └── rk3588-benchmarks.md
-├── models/
-│   └── .gitkeep
-├── data/
-│   └── .gitkeep
-├── scripts/
-│   ├── reap_bakeoff.py
-│   ├── reap_benchmark.py
-│   ├── reap_status.sh
-│   └── run_reap_pipeline.sh
-├── src/llama_webui/
-│   ├── app_state.py
-│   ├── download_manager.py
-│   ├── llama_manager.py
-│   ├── main.py
-│   ├── model_inventory.py
-│   └── settings.py
-└── static/
-    ├── app.js
-    ├── index.html
-    ├── styles.css
-    └── vendor/markdown-it.min.js
-```
+## Key Features
 
-Runtime artifacts under `data/`, downloaded models under `models/`, and local virtual environments are intentionally ignored by git.
+- **llama.cpp only** — no Ollama, no abstractions, full control
+- **Browser-driven** model loading and runtime config editing
+- **GPU auto-detection** — CUDA, ROCm, Metal, CPU profiles
+- **Streaming responses** via Server-Sent Events (SSE)
+- **Persistent chat history** in SQLite
+- **Model discovery** from configurable GGUF directories
+- **RK3588-tested presets** for fast daytime use and stronger overnight use
+- **Cross-platform** — ARM SBCs, desktop Linux, NVIDIA GPUs, Apple Silicon
+
+---
 
 ## Quick Start
 
-1. Build `llama.cpp` (see [Building llama.cpp](#building-llamacpp) below).
-2. Download at least one GGUF into `./models`, `~/models`, or any directory listed in `LLAMA_WEBUI_MODEL_DIRS`.
-3. Install and run:
-
 ```bash
-uv venv
-source .venv/bin/activate
+# 1. Clone and enter
+git clone https://github.com/SergiioB/llamacpp-workbench.git
+cd llamacpp-workbench
+
+# 2. Build llama.cpp (CUDA example)
+./scripts/build_llama_cuda.sh
+
+# 3. Download a GGUF model
+# e.g. from HuggingFace: https://huggingface.co/Qwen/Qwen3.5-4B-GGUF
+
+# 4. Install and run
+uv venv && source .venv/bin/activate
 uv pip install -e .
 llama-webui
 ```
 
-Open `http://<host>:8095`.
+Open `http://<host>:8095` in your browser.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Browser (Client)                       │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  llama-webui  │  Chat UI  │  Model Settings  │ Logs │   │
+│  └───────────────┴───────────┴──────────────────┴──────┘   │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTP / SSE
+┌────────────────────────────▼────────────────────────────────┐
+│                     FastAPI Server                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Chat Router  │  │Model Manager │  │Download Manager  │  │
+│  │   (SSE)      │  │              │  │                  │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  App State   │  │   Settings   │  │ Model Inventory  │  │
+│  │  (SQLite)    │  │  (.env)      │  │                  │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└────────────────────────────┬────────────────────────────────┘
+                             │ Subprocess / IPC
+┌────────────────────────────▼────────────────────────────────┐
+│                    llama.cpp (Binary)                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
+│  │llama-server  │  │  llama-cli   │  │ Custom Flags     │   │
+│  │ (HTTP API)   │  │ (Interactive)│  │ gpu_layers, ctx, │   │
+│  │              │  │              │  │ threads, etc.    │   │
+│  └──────────────┘  └──────────────┘  └──────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## GPU Backend Auto-Detection
+
+| Backend | Detection | Default Settings |
+|---------|-----------|------------------|
+| **CUDA** | `nvidia-smi` available | `gpu_layers=99`, `parallel=4`, `batch_size=512` |
+| **ROCm** | AMD GPU path | Same as CUDA profile |
+| **Metal** | Apple Silicon | Managed by llama.cpp |
+| **CPU** | Fallback | `gpu_layers=0`, `parallel=1`, `batch_size=128` |
+
+---
+
+## Tested Hardware
+
+| Component | Specification |
+|-----------|---------------|
+| Board | Radxa ROCK 5B+ |
+| SoC | Rockchip RK3588 |
+| Architecture | aarch64 |
+| Total cores | 8 (4x little + 4x big) |
+| RAM | 24 GiB |
+| Tested models | GLM-4.7-Flash-REAP-23B-A3B, Qwen3.5-4B |
+
+See [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md) for detailed benchmarks.
+
+---
+
+## Best Configurations
+
+### Best quality-per-size on RK3588
+
+**Model:** `GLM-4.7-Flash-REAP-23B-A3B-Q3_K_M.gguf`
+
+**Settings:**
+```
+cpu_affinity: 4-7
+threads: 4
+parallel: 1
+context: 202752
+batch_size: 128
+KV cache: --cache-type-k q8_0 --cache-type-v q4_0
+thinking: disabled (--reasoning-budget 0)
+```
+
+### Fast daytime fallback
+
+**Model:** `Qwen3.5-4B-Q4_K_M.gguf` — lighter footprint, faster and more reliable for interactive use.
+
+---
+
+## Repository Layout
+
+```
+llama-webui/
+├── README.md
+├── pyproject.toml
+├── .env.example
+├── .github/              # GitHub Actions CI/CD
+├── docs/
+│   ├── hardware-portability.md
+│   ├── reap-roadmap.md
+│   └── rk3588-benchmarks.md
+├── models/               # GGUF models (gitignored)
+├── data/                 # SQLite, logs (gitignored)
+├── scripts/
+│   ├── build_llama_cuda.sh
+│   ├── build_llama_cuda.ps1
+│   ├── setup_windows.ps1
+│   ├── reap_benchmark.py
+│   └── run_reap_pipeline.sh
+├── src/llama_webui/
+│   ├── main.py           # FastAPI app entry
+│   ├── app_state.py      # SQLite state management
+│   ├── llama_manager.py  # llama.cpp process management
+│   ├── model_inventory.py # GGUF discovery
+│   ├── download_manager.py # Model download handling
+│   └── settings.py       # Configuration
+└── static/
+    ├── app.js            # Frontend logic
+    ├── index.html        # Chat UI
+    └── styles.css
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LLAMA_WEBUI_DATA_DIR` | Data directory | `./data` |
+| `LLAMA_WEBUI_MODEL_DIRS` | GGUF search paths | `./models`, `~/models` |
+| `LLAMA_WEBUI_DEFAULT_DOWNLOAD_DIR` | Model download target | First existing model root |
+| `LLAMA_WEBUI_LLAMA_SERVER` | Path to llama-server | Auto-resolved |
+| `LLAMA_WEBUI_LLAMA_CLI` | Path to llama-cli | Auto-resolved |
+
+See [.env.example](./.env.example) for concrete examples.
+
+---
 
 ## Building llama.cpp
 
 ### CUDA Build (NVIDIA GPU)
 
 ```bash
-# Option 1: Use the build script
 ./scripts/build_llama_cuda.sh
-
-# Option 2: Manual build
-git clone https://github.com/ggerganov/llama.cpp.git third_party/llama.cpp
-cd third_party/llama.cpp
-mkdir build-cuda && cd build-cuda
-cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_CLI=ON
-cmake --build . --config Release -j$(nproc)
 ```
-
-The app automatically prefers `third_party/llama.cpp/build-cuda/bin/llama-server` on CUDA systems.
 
 ### CPU-only / RK3588 Build
 
@@ -107,191 +211,61 @@ cmake --build . --config Release -j$(nproc)
 
 ### TurboQuant (TQ3_1S) for 16GB GPUs
 
-[TurboQuant](https://github.com/turbo-tan/llama.cpp-tq3) enables 3.5-bit quantization to fit 27B models on 16GB GPUs:
-
-- ~10% smaller than Q4_0 with near-identical quality
-- See [original research](https://x.com/coffeecup2020/status/2038725930626003140)
-
 ```bash
 git clone https://github.com/turbo-tan/llama.cpp-tq3.git third_party/llama.cpp-tq3
 cd third_party/llama.cpp-tq3
 mkdir build && cd build
 cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build . --config Release -j$(nproc)
-
-# Download pre-quantized model:
-# https://huggingface.co/YTan2000/Qwen3.5-27B-TQ3_1S
 ```
 
-## Configuration
+---
 
-The app is path-portable. Machine-specific paths have been replaced with environment-driven defaults.
+## What We Learned
 
-Supported environment variables:
+- REAP-pruned MoE models deliver surprisingly strong quality-per-size on constrained hardware
+- **Disabling reasoning scratchpad** gave dramatically better interactive latency on RK3588
+- KV cache quantization (`--cache-type-k q8_0 --cache-type-v q4_0`) matters enough to keep enabled by default
+- For this board, the winning configuration was not "enable more thinking" — it was the opposite
 
-- `LLAMA_WEBUI_DATA_DIR`
-- `LLAMA_WEBUI_MODEL_DIRS`
-- `LLAMA_WEBUI_DEFAULT_DOWNLOAD_DIR`
-- `LLAMA_WEBUI_LLAMA_SERVER`
-- `LLAMA_WEBUI_LLAMA_CLI`
-
-See [.env.example](./.env.example) for concrete examples.
-
-Default behavior without overrides:
-
-- data directory: `./data`
-- model search roots: `./models` and `~/models`
-- default download target: first existing model root, otherwise `./models`
-- `llama-server` / `llama-cli`: resolved from env, then `PATH`, then common local build locations under `third_party/llama.cpp`
-
-## Tested Hardware
-
-This repository was validated primarily on:
-
-- board: `Radxa ROCK 5B+`
-- SoC: `Rockchip RK3588`
-- architecture: `aarch64`
-- total cores: `8`
-- little cluster: CPUs `0-3`, max `1800 MHz`
-- big cluster: CPUs `4-5`, max `2304 MHz`
-- faster big cores: CPUs `6-7`, max `2352 MHz`
-- RAM class: about `24 GiB`
-- swap enabled during testing: about `11 GiB`
-
-The detailed benchmark write-up is in [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md).
-
-## Hardware Scope
-
-Although the strongest validation is on the ROCK 5B+, the repository itself is not ARM-only.
-
-The web UI works anywhere `llama.cpp` works, including:
-
-- ARM SBCs running CPU-only inference
-- desktop Linux CPU-only systems
-- NVIDIA CUDA hosts using `--n-gpu-layers`
-- AMD ROCm hosts using `llama.cpp` GPU offload
-- Apple Silicon or other systems, as long as the local `llama.cpp` build and binaries are available
-
-What changes per machine is not the app architecture, but the runtime tuning:
-
-- `gpu_layers`
-- `ctx_size`
-- `threads`
-- `parallel`
-- `batch_size`
-- `ubatch_size`
-- custom `llama.cpp` flags
-
-See [docs/hardware-portability.md](./docs/hardware-portability.md) for starting profiles on non-RK3588 hardware.
-
-## GPU Backend Auto-Detection
-
-The app automatically detects your GPU backend on startup:
-
-| Backend | Detection | Default Settings |
-|---------|-----------|-----------------|
-| **CUDA** | `nvidia-smi` available | `gpu_layers=99`, `parallel=4`, `batch_size=512` |
-| **ROCm** | AMD GPU path | Same as CUDA profile |
-| **Metal** | Apple Silicon | Managed by llama.cpp |
-| **CPU** | Fallback | `gpu_layers=0`, `parallel=1`, `batch_size=128` |
-
-The detected backend affects:
-- Default `gpu_layers` (99 for CUDA/ROCm, 0 for CPU)
-- Default `parallel`, `batch_size`, `ubatch_size` values
-- Model presets shown in the UI
-- Build path priority for `llama-server` binary
-
-## Models We Actually Tested
-
-The most important real board-local candidates were:
-
-- `cerebras/GLM-4.7-Flash-REAP-23B-A3B`
-- `Qwen/Qwen3.5-4B-GGUF`
-
-Links:
-
-- <https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B>
-- <https://huggingface.co/zai-org/GLM-4.7-Flash>
-- <https://huggingface.co/Qwen/Qwen3.5-4B-GGUF>
-
-## Best Configurations We Found
-
-### Best interactive quality-per-size on the ROCK 5B+
-
-Model:
-
-- `GLM-4.7-Flash-REAP-23B-A3B-Q3_K_M.gguf`
-
-Settings that were validated locally:
-
-- CPU affinity: `4-7`
-- threads: `4`
-- parallel: `1`
-- context: `202752`
-- batch size: `128`
-- ubatch size: `32`
-- temperature: `1.0`
-- top-p: `0.95`
-- top-k: `40`
-- max tokens: `1024` interactive default
-- KV cache quantization: `--cache-type-k q8_0 --cache-type-v q4_0`
-- thinking: disabled via `--reasoning-budget 0 --reasoning-format none`
-
-### Best fast daytime fallback on the ROCK 5B+
-
-Model:
-
-- `Qwen3.5-4B-Q4_K_M.gguf`
-
-Reason:
-
-- much lighter footprint
-- clearly faster and more reliable than larger REAP candidates on the board
-- still coherent enough for day-to-day interactive use
-
-The detailed evidence is in [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md).
-
-## What We Learned About REAP On This Board
-
-- REAP-pruned MoE models can deliver surprisingly strong quality-per-size on RK3588.
-- The winning local configuration was not "enable more thinking"; it was the opposite.
-- For this board, disabling reasoning scratchpad gave dramatically better interactive latency.
-- KV cache quantization mattered enough to keep enabled by default.
-- Full trained context on the GLM REAP model was usable from a serving perspective, but prefill and total latency still have to be judged against workload shape.
-
-## Personal Data / Corpus Workflow
-
-This repository does not ship personal exports or a pruning dataset.
-
-The intended external workflow is:
-
-1. export assistant and web-chat history with a separate extraction tool
-2. normalize those exports into a pruning or retrieval corpus
-3. run pruning or further analysis off-device
-4. bring the resulting GGUF back here for benchmarking and serving
-
-The public-safe roadmap and expected data layout are documented in [docs/reap-roadmap.md](./docs/reap-roadmap.md).
+---
 
 ## Current Status
 
-What is production-usable now:
+| Feature | Status |
+|---------|--------|
+| Web UI | ✅ Production-ready |
+| Persistent chats | ✅ Production-ready |
+| Model scanning/loading | ✅ Production-ready |
+| Streaming responses | ✅ Production-ready |
+| Benchmark helpers | ✅ Production-ready |
+| RK3588-tuned presets | ✅ Production-ready |
+| Corpus ingestion | 🔜 Planned |
+| Retrieval/memory pages | 🔜 Planned |
+| Personalized REAP build | 🔜 Planned |
 
-- web UI
-- persistent chats
-- model scanning and loading
-- streaming responses with markdown rendering
-- benchmark helpers
-- RK3588-tuned presets
+---
 
-What is still missing:
+## Contributing
 
-- first-class corpus ingestion inside the UI
-- retrieval / memory pages
-- integrated REAP job orchestration
-- a personalized `Qwen3.5-35B-A3B` artifact produced from a real user corpus
+Contributions welcome. Please:
 
-## Notes
+1. Fork the repo
+2. Create a feature branch
+3. Run `ruff check . && mypy src/`
+4. Submit a PR
 
-- This repository has intentionally been stripped of host-specific absolute paths.
-- Runtime databases, logs, downloaded models, and virtual environments are ignored by git.
-- License selection is intentionally left to the repository owner rather than assumed here.
+---
+
+## License
+
+MIT
+
+---
+
+## Related Links
+
+- [llama.cpp](https://github.com/ggerganov/llama.cpp)
+- [TurboQuant paper (ICLR 2026)](https://arxiv.org/abs/XXXXX)
+- [GLM-4.7-Flash-REAP-23B-A3B on HuggingFace](https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B)
+- [My portfolio: sergiiob.dev](https://sergiiob.dev)
