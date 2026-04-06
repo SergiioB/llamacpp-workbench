@@ -1,98 +1,37 @@
 name: Bug Report
-description: Report a bug or unexpected behavior in llama-webui
-labels: ["bug", "needs-triage"]
+description: File a bug report
+title: "[Bug] "
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this bug. Please fill out the sections below to help us understand and fix the issue.
+        ## Bug Description
+        Describe the bug clearly.
 
-  - type: textarea
-    id: description
-    attributes:
-      label: Bug Description
-      description: A clear and concise description of what the bug is.
-      placeholder: "When I try to load a model with..."
-    validations:
-      required: true
+        ## Steps to Reproduce
+        1. Go to '...'
+        2. Run '...'
+        3. See error
 
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior.
-      placeholder: |
-        1. Start llama-webui with...
-        2. Navigate to...
-        3. Click on...
-        4. See error
-    validations:
-      required: true
+        ## Expected Behavior
+        What should happen.
 
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected Behavior
-      description: What did you expect to happen?
-      placeholder: "The model should load successfully and..."
-    validations:
-      required: true
-
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual Behavior
-      description: What actually happened?
-      placeholder: "Instead, the server crashed with..."
-    validations:
-      required: true
-
+        ## Environment
+        - OS: [e.g. Ubuntu 22.04, RK3588, etc.]
+        - Python version:
+        - Hardware: [e.g. NVIDIA RTX 3080, RK3588, etc.]
   - type: textarea
     id: logs
     attributes:
-      label: Logs or Error Messages
-      description: Relevant log output or error messages.
-      placeholder: "Paste logs here (use backticks for formatting)"
-      render: shell
-
-  - type: input
-    id: version
-    attributes:
-      label: llama-webui Version
-      description: What version of llama-webui are you running?
-      placeholder: "0.1.0 or commit hash"
+      label: Relevant Log Output
+      description: Paste any relevant error messages or logs
     validations:
-      required: true
-
+      required: false
   - type: textarea
-    id: environment
-    attributes:
-      label: Environment
-      description: Your system environment.
-      placeholder: |
-        - OS: [e.g., Ubuntu 22.04, macOS 14.0]
-        - Python version: [e.g., 3.11]
-        - llama.cpp commit: [e.g., abc123]
-        - Hardware: [e.g., RK3588, x86_64 desktop]
-    validations:
-      required: true
-
-  - type: dropdown
-    id: gpu
-    attributes:
-      label: GPU/Acceleration
-      description: What acceleration are you using?
-      options:
-        - CPU only
-        - CUDA (NVIDIA)
-        - Metal (Apple Silicon)
-        - ROCm (AMD)
-        - Other
-    validations:
-      required: true
-
-  - type: textarea
-    id: additional
+    id: context
     attributes:
       label: Additional Context
-      description: Any other context about the problem.
+      description: Any other context about the problem
+    validations:
+      required: false

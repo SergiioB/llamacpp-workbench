@@ -11,6 +11,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -72,10 +74,8 @@ class LlamaServerManager:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            try:
+            with suppress(FileNotFoundError):
                 self.pid_path.unlink()
-            except FileNotFoundError:
-                pass
             return None
         return pid
 
@@ -153,16 +153,12 @@ class LlamaServerManager:
         else:
             managed_pid = self._managed_pid()
             if managed_pid is not None:
-                try:
+                with suppress(ProcessLookupError):
                     os.kill(managed_pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
         self.process = None
         self.started_with = None
-        try:
+        with suppress(FileNotFoundError):
             self.pid_path.unlink()
-        except FileNotFoundError:
-            pass
 
     def stop_generation(self) -> bool:
         with self._active_lock:
@@ -172,10 +168,8 @@ class LlamaServerManager:
                 return False
             cancel.set()
             if connection is not None:
-                try:
+                with suppress(OSError):
                     connection.close()
-                except OSError:
-                    pass
             return True
 
     def chat(self, config: dict[str, Any], messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -187,7 +181,11 @@ class LlamaServerManager:
             raise RuntimeError("llama.cpp stream ended without a completion result")
         return result
 
-    def chat_stream(self, config: dict[str, Any], messages: list[dict[str, str]]):
+    def chat_stream(
+        self,
+        config: dict[str, Any],
+        messages: list[dict[str, str]],
+    ) -> Iterator[dict[str, Any]]:
         payload = {
             "model": "local",
             "messages": messages,
@@ -261,15 +259,11 @@ class LlamaServerManager:
             if not cancel.is_set():
                 raise RuntimeError(str(error)) from error
         finally:
-            try:
+            with suppress(OSError):
                 if response is not None:
                     response.close()
-            except OSError:
-                pass
-            try:
+            with suppress(OSError):
                 connection.close()
-            except OSError:
-                pass
             with self._active_lock:
                 self._active_cancel = None
                 self._active_connection = None

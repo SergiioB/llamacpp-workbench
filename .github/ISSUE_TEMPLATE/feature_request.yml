@@ -1,62 +1,22 @@
 name: Feature Request
-description: Suggest a new feature or enhancement for llama-webui
-labels: ["enhancement", "needs-triage"]
+description: Suggest a new feature
+title: "[Feature] "
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a feature! Please describe your idea in detail to help us understand and prioritize it.
+        ## Feature Description
+        Describe the feature you'd like to see.
 
-  - type: textarea
-    id: problem
-    attributes:
-      label: Problem or Use Case
-      description: Is your feature request related to a problem? Please describe.
-      placeholder: "I'm always frustrated when I try to..."
-    validations:
-      required: true
+        ## Use Case
+        What's the problem this solves? Who would use it?
 
-  - type: textarea
-    id: solution
-    attributes:
-      label: Proposed Solution
-      description: Describe the solution you'd like to see.
-      placeholder: "It would be great if llama-webui could..."
-    validations:
-      required: true
+        ## Proposed Solution
+        How do you think this could be implemented?
 
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives Considered
-      description: Have you considered any alternative solutions or workarounds?
-      placeholder: "I've tried using... but it doesn't work because..."
+        ## Alternatives Considered
+        Any alternatives you've considered?
 
-  - type: textarea
-    id: impact
-    attributes:
-      label: Impact and Use Cases
-      description: Who would benefit from this feature? What are the main use cases?
-      placeholder: |
-        This would help users who...
-        Use cases:
-        - ...
-        - ...
-
-  - type: dropdown
-    id: priority
-    attributes:
-      label: Priority
-      description: How important is this feature to you?
-      options:
-        - Nice to have
-        - Important
-        - Critical for my use case
-    validations:
-      required: true
-
-  - type: textarea
-    id: additional
-    attributes:
-      label: Additional Context
-      description: Any other context, mockups, or examples.
+        ## Additional Context
+        Screenshots, examples, or references.

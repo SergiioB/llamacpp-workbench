@@ -9,16 +9,14 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import threading
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-
-from llama_webui.settings import benchmark_dir, resolve_llama_cli_binary
 
 
 PROMPT = """You are benchmarking a local model on resource-constrained hardware.
@@ -40,6 +38,18 @@ Use detailed prose and numbered sections."""
 PROMPT_RE = re.compile(r"prompt eval time =\s*([0-9.]+)\s*ms\s*/\s*([0-9]+)\s*tokens")
 GEN_RE = re.compile(r"\beval time =\s*([0-9.]+)\s*ms\s*/\s*([0-9]+)\s*tokens")
 TOTAL_RE = re.compile(r"total time =\s*([0-9.]+)\s*ms\s*/\s*([0-9]+)\s*tokens")
+
+
+def _benchmark_dir() -> Path:
+    from llama_webui.settings import benchmark_dir
+
+    return benchmark_dir()
+
+
+def _resolve_llama_cli_binary() -> str:
+    from llama_webui.settings import resolve_llama_cli_binary
+
+    return resolve_llama_cli_binary()
 
 
 def read_rss_kib(pid: int) -> int:
@@ -82,8 +92,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--predict", type=int, default=1000)
     parser.add_argument("--timeout-seconds", type=int, default=5400)
     parser.add_argument("--extra-arg", action="append", default=[])
-    parser.add_argument("--llama-cli", default=resolve_llama_cli_binary())
-    parser.add_argument("--output-dir", default=str(benchmark_dir()))
+    parser.add_argument("--llama-cli", default=_resolve_llama_cli_binary())
+    parser.add_argument("--output-dir", default=str(_benchmark_dir()))
     return parser.parse_args()
 
 
@@ -116,59 +126,62 @@ def main() -> int:
     cmd.extend(args.extra_arg)
 
     started = time.time()
-    tmp_output = tempfile.NamedTemporaryFile(
+    max_rss_kib = 0
+    timed_out = False
+    output = ""
+    stop_sampling = threading.Event()
+    proc: subprocess.Popen[str] | None = None
+
+    with tempfile.NamedTemporaryFile(
         mode="w+",
         encoding="utf-8",
         errors="replace",
         delete=False,
         prefix=f"{args.label}-",
         suffix=".log",
-    )
-    tmp_output_path = Path(tmp_output.name)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=tmp_output,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace",
-    )
+    ) as tmp_output:
+        tmp_output_path = Path(tmp_output.name)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=tmp_output,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+        )
 
-    max_rss_kib = 0
-    timed_out = False
-    output = ""
-    stop_sampling = threading.Event()
+        def sample_rss() -> None:
+            nonlocal max_rss_kib
+            assert proc is not None
+            while not stop_sampling.is_set():
+                max_rss_kib = max(max_rss_kib, read_rss_kib(proc.pid))
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.25)
 
-    def sample_rss() -> None:
-        nonlocal max_rss_kib
-        while not stop_sampling.is_set():
-            max_rss_kib = max(max_rss_kib, read_rss_kib(proc.pid))
-            if proc.poll() is not None:
-                break
-            time.sleep(0.25)
+        sampler = threading.Thread(target=sample_rss, daemon=True)
+        sampler.start()
 
-    sampler = threading.Thread(target=sample_rss, daemon=True)
-    sampler.start()
-
-    try:
-        proc.wait(timeout=args.timeout_seconds)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        kill_process_tree(proc.pid)
-    finally:
-        stop_sampling.set()
-        sampler.join(timeout=1)
-        if proc.poll() is None:
+        try:
+            proc.wait(timeout=args.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
             kill_process_tree(proc.pid)
-        tmp_output.flush()
-        tmp_output.close()
-        output = tmp_output_path.read_text(encoding="utf-8", errors="replace")
+        finally:
+            stop_sampling.set()
+            sampler.join(timeout=1)
+            if proc.poll() is None:
+                kill_process_tree(proc.pid)
+            tmp_output.flush()
+
+    output = tmp_output_path.read_text(encoding="utf-8", errors="replace")
+    assert proc is not None
 
     prompt_match = PROMPT_RE.search(output)
     gen_match = GEN_RE.search(output)
     total_match = TOTAL_RE.search(output)
 
     result: dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "label": args.label,
         "model": args.model,
         "threads": args.threads,
@@ -193,7 +206,7 @@ def main() -> int:
         "output_tail": output[-6000:],
     }
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = output_dir / f"{timestamp}-{args.label}-1000tok.json"
     out_path.write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))

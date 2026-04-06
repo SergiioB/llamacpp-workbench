@@ -134,6 +134,8 @@ class AppState:
             cur = self._conn.execute("INSERT INTO chats (title) VALUES (?)", (safe_title,))
             self._conn.commit()
             chat_id = cur.lastrowid
+        if chat_id is None:
+            raise RuntimeError("failed to create chat")
         return self.get_chat(chat_id)
 
     def ensure_chat(self, chat_id: int | None) -> dict[str, Any]:

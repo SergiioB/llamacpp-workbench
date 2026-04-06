@@ -9,18 +9,28 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from llama_webui.settings import benchmark_dir, resolve_llama_cli_binary
-
 
 PROMPT = "Say hello in one short sentence."
 SPEED_RE = re.compile(r"Prompt:\s*([0-9.]+)\s*t/s\s*\|\s*Generation:\s*([0-9.]+)\s*t/s")
+
+
+def _benchmark_dir() -> Path:
+    from llama_webui.settings import benchmark_dir
+
+    return benchmark_dir()
+
+
+def _resolve_llama_cli_binary() -> str:
+    from llama_webui.settings import resolve_llama_cli_binary
+
+    return resolve_llama_cli_binary()
 
 
 def read_meminfo() -> dict[str, int]:
@@ -72,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--ubatch-size", type=int, default=32)
     parser.add_argument("--predict", type=int, default=32)
-    parser.add_argument("--llama-cli", default=resolve_llama_cli_binary())
-    parser.add_argument("--output-dir", default=str(benchmark_dir()))
+    parser.add_argument("--llama-cli", default=_resolve_llama_cli_binary())
+    parser.add_argument("--output-dir", default=str(_benchmark_dir()))
     return parser.parse_args()
 
 
@@ -158,7 +168,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result: dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "label": args.label,
         "model": str(model_path),
         "threads": args.threads,
@@ -175,7 +185,7 @@ def main() -> int:
         if not run["success"]:
             break
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = output_dir / f"{timestamp}-{args.label}.json"
     out_path.write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))

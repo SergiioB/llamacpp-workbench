@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import uvicorn
@@ -198,7 +199,7 @@ def send_message(chat_id: int, payload: MessagePayload) -> dict[str, Any]:
 
 
 @app.post("/api/chats/{chat_id}/messages/stream")
-def stream_message(chat_id: int, payload: MessagePayload):
+def stream_message(chat_id: int, payload: MessagePayload) -> StreamingResponse:
     config = state.get_config()
     status = manager.health(config)
     if not status["healthy"]:
@@ -219,7 +220,7 @@ def stream_message(chat_id: int, payload: MessagePayload):
     def emit(event: dict[str, Any]) -> bytes:
         return (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
 
-    def event_stream():
+    def event_stream() -> Iterator[bytes]:
         yield emit({
             "type": "start",
             "chat_id": chat["chat_id"],
