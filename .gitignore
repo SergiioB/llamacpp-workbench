@@ -53,3 +53,12 @@ wget-log
 # Logs
 *.log
 logs/
+
+# Agent / factory tooling
+.factory/
+.factory/**
+skills/
+.skills/
+
+# Documentation (kept locally, not in git)
+docs/
