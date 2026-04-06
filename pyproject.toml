@@ -94,5 +94,9 @@ implicit_reexport = false
 strict_equality = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
+module = "llama_webui.main"
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "uvicorn"
+ignore_missing_imports = true
