@@ -12,9 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
 import yaml
-
 from agentic_bakeoff import (
     MODELS,
     RESULTS_DIR,
@@ -24,7 +22,7 @@ from agentic_bakeoff import (
     stop_process,
     wait_for_health,
 )
-
+from openai import OpenAI
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LLAMA_SERVER = Path(

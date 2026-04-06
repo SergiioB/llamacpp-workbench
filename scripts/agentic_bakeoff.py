@@ -15,7 +15,6 @@ from typing import Any
 
 from openai import OpenAI
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results"
 SANDBOX_TEMPLATE = ROOT / "sandbox_repo"
