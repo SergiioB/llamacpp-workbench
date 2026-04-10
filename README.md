@@ -1,11 +1,15 @@
+![llama-webui banner](./assets/readme-banner.svg)
+
 # llama-webui
 
-> Standalone local web UI for `llama.cpp` with persistent chats, model management, streaming responses, and hardware-aware runtime tuning.
+> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, and RK3588-aware tuning.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy.readthedocs.io/)
+[![llama.cpp](https://img.shields.io/badge/runtime-llama.cpp-6b46c1.svg)](https://github.com/ggml-org/llama.cpp)
+[![RK3588](https://img.shields.io/badge/tested-RK3588%20%2F%20ROCK%205B%2B-14532d.svg)](./REAP_RK3588_NOTES.md)
 
 ## What This Is
 
@@ -15,6 +19,8 @@ This repository started as a board-local control surface for testing REAP-pruned
 
 - A practical remote web UI for loading and serving local GGUF models with `llama.cpp`
 - A documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
+
+The main point is simple: keep the convenience of a web UI without giving up the flags that decide whether local inference is actually usable.
 
 ## What Makes It Different
 
@@ -60,6 +66,15 @@ If you just want a generic chat shell, other tools already cover that. This repo
 - browser control plane
 - model inventory and presets
 - easier inspection of runtime state and configuration
+
+## Why RK3588 Is A First-Class Target
+
+Most local-AI tools talk about ARM boards as a novelty. This repo does not.
+
+- It was shaped around real tuning work on a `Radxa ROCK 5B+`.
+- It exposes the settings that matter on RK3588: context, KV cache quantization, threads, affinity, and no-thinking mode.
+- It carries benchmark-backed presets instead of pretending the same defaults work equally well on laptops, workstations, and SBCs.
+- It is useful when the goal is stable, private local inference on constrained hardware, not just desktop demos.
 
 ## Key Features
 
@@ -159,6 +174,17 @@ llama-webui
 See [WINDOWS_SETUP_GUIDE.md](./WINDOWS_SETUP_GUIDE.md) and [SETUP_MISSING_COMPONENTS.md](./SETUP_MISSING_COMPONENTS.md) for the Windows flow and dependency troubleshooting.
 
 Open `http://<host>:8095`.
+
+## Recommended RK3588 Defaults
+
+For a `Radxa ROCK 5B+` or other `RK3588` board, the practical interactive baseline is:
+
+- `Qwen3.5-2B` for the fast tier
+- `Qwen3.5-4B` when quality matters more than latency
+- explicit no-thinking flags for chat-style serving
+- `rk-llama.cpp` where available for the better CPU path
+
+The tracked board notes live in [REAP_RK3588_NOTES.md](./REAP_RK3588_NOTES.md).
 
 ## Architecture
 
