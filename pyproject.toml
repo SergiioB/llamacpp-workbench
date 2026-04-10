@@ -8,7 +8,7 @@ license = {text = "MIT"}
 authors = [
     {name = "Sergio Barrientos", email = "sergio@sergiiob.dev"},
 ]
-keywords = ["llama.cpp", "gguf", "local-llm", "edge-ai", "llm-inference", "rk3588", "llm"]
+keywords = ["llama.cpp", "gguf", "local-llm", "edge-ai", "llm-inference", "rk3588", "radxa", "benchmarking", "webui"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -35,6 +35,12 @@ dev = [
 
 [project.scripts]
 llama-webui = "llama_webui.main:run"
+
+[project.urls]
+Homepage = "https://github.com/SergiioB/llamacpp-workbench"
+Repository = "https://github.com/SergiioB/llamacpp-workbench"
+Issues = "https://github.com/SergiioB/llamacpp-workbench/issues"
+Documentation = "https://github.com/SergiioB/llamacpp-workbench#readme"
 
 [build-system]
 requires = ["hatchling"]
