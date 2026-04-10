@@ -16,6 +16,51 @@ This repository started as a board-local control surface for testing REAP-pruned
 - A practical remote web UI for loading and serving local GGUF models with `llama.cpp`
 - A documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
 
+## What Makes It Different
+
+Many local-AI UIs optimize for convenience first and runtime visibility second. `llama-webui` is deliberately built the other way around.
+
+- It talks to compiled `llama.cpp` directly instead of wrapping Ollama.
+- It preserves the flags that actually decide whether a host feels usable:
+  - KV cache type
+  - context window
+  - batch and ubatch sizing
+  - CPU affinity
+  - GPU offload depth
+  - reasoning / no-thinking mode
+- It treats benchmark-backed hardware tuning as a feature, not background trivia.
+- It is intentionally credible on small ARM systems, especially the `Radxa ROCK 5B+` with `RK3588`, not only on desktop GPUs.
+
+If you just want a generic chat shell, other tools already cover that. This repo is for people who want a usable web UI without giving up the runtime knobs that explain real behavior.
+
+## Who It Is For
+
+- engineers benchmarking GGUF models on `llama.cpp`
+- people serving models on ARM SBCs, headless Linux hosts, or mixed desktop hardware
+- developers who want a remote control plane for model switching and runtime tuning
+- anyone who needs to compare presets, flags, and model behavior with less guesswork
+
+## Compared To Other Options
+
+### Versus Ollama-based UIs
+
+- more direct control over `llama.cpp` startup flags
+- easier to reason about model-specific tuning and failure modes
+- better fit for benchmarking, profiling, and constrained-hardware tuning
+
+### Versus desktop-first local AI tools
+
+- less GPU-desktop assumption baked into the defaults
+- friendlier to SBC and remote-host workflows
+- clearer path to RK3588 and CPU-first tuning
+
+### Versus ad hoc shell scripts
+
+- persistent chats
+- browser control plane
+- model inventory and presets
+- easier inspection of runtime state and configuration
+
 ## Key Features
 
 - `llama.cpp` only, with no Ollama dependency or hidden abstraction layer
@@ -26,6 +71,7 @@ This repository started as a board-local control surface for testing REAP-pruned
 - Model discovery from configurable GGUF directories
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
 - RK3588-tested presets for fast daytime use and stronger overnight use
+- explicit no-thinking defaults for interactive serving, plus visible-response sanitation when models leak empty think wrappers anyway
 
 ## Repository Layout
 
@@ -244,7 +290,7 @@ The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ub
 - Architecture: `aarch64`
 - Total cores: `8`
 - RAM class: about `24 GiB`
-- Tested models: `GLM-4.7-Flash-REAP-23B-A3B`, `Qwen3.5-4B`
+- Tested models: `GLM-4.7-Flash-REAP-23B-A3B`, `Qwen3.5-2B`, `Qwen3.5-4B`, `Qwen3.5-9B`
 
 ### Windows Desktop / Laptop
 
@@ -285,17 +331,25 @@ Validated settings:
 - Context: `202752`
 - Batch size: `128`
 - KV cache quantization: `--cache-type-k q8_0 --cache-type-v q4_0`
-- Thinking disabled: `--reasoning-budget 0 --reasoning-format none`
+- Thinking disabled: `--reasoning off --reasoning-budget 0 --reasoning-format none`
 
 ### Fast daytime fallback
+
+- `Qwen3.5-2B-Q4_K_M.gguf`
+
+Reason:
+
+- Best measured latency / throughput balance for interactive RK3588 CPU use
+- Strong enough for chat, light coding, and day-to-day local work
+
+### Slower but stronger Qwen quality tier
 
 - `Qwen3.5-4B-Q4_K_M.gguf`
 
 Reason:
 
-- Much lighter footprint
-- Faster and more reliable for interactive use
-- Still coherent enough for day-to-day local work
+- Slower than 2B on RK3588, but structurally better on harder prompts
+- Better treated as a quality tier than as the universal default
 
 ## What We Learned
 
@@ -303,6 +357,7 @@ Reason:
 - Disabling reasoning scratchpad improved interactive latency materially on RK3588
 - KV cache quantization mattered enough to keep enabled by default
 - On this board, the best interactive profile came from better runtime tuning, not from enabling more model thinking
+- Even with reasoning disabled server-side, some models can still leak empty `<think>` wrappers, so user-visible response sanitation is still worth keeping
 
 ## Current Status
 

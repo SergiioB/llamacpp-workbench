@@ -41,7 +41,7 @@ def default_config() -> dict[str, Any]:
         "presence_penalty": 0.0,
         "max_tokens": 512,
         "system_prompt": "",
-        "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning-budget 0 --reasoning-format none",
+        "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
     }
 
 
