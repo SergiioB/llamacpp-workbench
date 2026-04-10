@@ -141,7 +141,7 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
                 "repeat_penalty": 1.0,
                 "presence_penalty": 0.0,
                 "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning-budget 0 --reasoning-format none",
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
             }
         )
         return tuned
@@ -149,19 +149,49 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
     if _is_qwen_27b(model_path) or "27b" in lower:
         tuned.update(
             {
-                "ctx_size": 16384,
+                "ctx_size": 4096,
                 "threads": 4,
                 "cpu_mask": "4-7",
                 "parallel": 1,
                 "batch_size": 128,
                 "ubatch_size": 32,
                 "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
             }
         )
         return tuned
 
     if "9b" in lower or "8b" in lower or "7b" in lower:
+        tuned.update(
+            {
+                "ctx_size": 8192,
+                "threads": 4,
+                "cpu_mask": "4-7",
+                "parallel": 1,
+                "batch_size": 256,
+                "ubatch_size": 64,
+                "max_tokens": 1024,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
+            }
+        )
+        return tuned
+
+    if "4b" in lower:
+        tuned.update(
+            {
+                "ctx_size": 16384,
+                "threads": 4,
+                "cpu_mask": "4-7",
+                "parallel": 1,
+                "batch_size": 256,
+                "ubatch_size": 64,
+                "max_tokens": 1024,
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
+            }
+        )
+        return tuned
+
+    if any(size_hint in lower for size_hint in ("3b", "2b", "1.7b")):
         tuned.update(
             {
                 "ctx_size": 32768,
@@ -171,22 +201,22 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
                 "batch_size": 256,
                 "ubatch_size": 64,
                 "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
             }
         )
         return tuned
 
-    if any(size_hint in lower for size_hint in ("4b", "3b", "2b", "1.7b", "0.8b")):
+    if "0.8b" in lower:
         tuned.update(
             {
-                "ctx_size": 65536,
+                "ctx_size": 16384,
                 "threads": 4,
                 "cpu_mask": "4-7",
                 "parallel": 1,
                 "batch_size": 256,
                 "ubatch_size": 64,
                 "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0",
+                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
             }
         )
         return tuned
