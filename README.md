@@ -19,11 +19,13 @@ This repository started as a board-local control surface for testing REAP-pruned
 ## Key Features
 
 - `llama.cpp` only, with no Ollama dependency or hidden abstraction layer
+- **Browser-based inference via WebGPU** -- run models directly in the browser with no server-side llama.cpp needed
 - Browser-driven model loading and runtime config editing
 - GPU auto-detection for CUDA, ROCm, Metal, and CPU-first profiles
 - Streaming responses via Server-Sent Events
 - Persistent chat history in SQLite
-- Model discovery from configurable GGUF directories
+- Model discovery from configurable GGUF directories (including HuggingFace Hub cache)
+- VRAM estimation and MoE/REAP model detection per model
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
 - RK3588-tested presets for fast daytime use and stronger overnight use
 
@@ -114,28 +116,92 @@ See [WINDOWS_SETUP_GUIDE.md](./WINDOWS_SETUP_GUIDE.md) and [SETUP_MISSING_COMPON
 
 Open `http://<host>:8095`.
 
+### Browser Inference (No Server-Side Build Needed)
+
+`llama-webui` can run LLM models **directly in the browser** using WebGPU. No llama.cpp build, no CUDA toolkit, no compiled binaries -- just a browser with a GPU.
+
+**Requirements:**
+
+- Chromium-based browser: Chrome 113+, Edge 113+, or Opera 99+
+- A GPU (NVIDIA, AMD, Apple Silicon, or Intel Arc)
+- The Python FastAPI server running (just to serve the HTML/JS/CSS files)
+
+**How to use:**
+
+```bash
+# Start the server (only serves static files for browser mode)
+source .venv/bin/activate
+llama-webui
+```
+
+1. Open `http://localhost:8095` in Chrome/Edge
+2. The sidebar shows a **"Browser Inference (WebGPU)"** panel if WebGPU is available
+3. Click **"Enable Browser Mode"** -- loads the WebLLM engine (~1MB)
+4. Select a model from the dropdown and click **"Load"**
+5. Chat normally -- inference runs on your local GPU via WebGPU
+
+**Available browser models:**
+
+| Model | Size | Notes |
+|-------|------|-------|
+| SmolLM2 135M | ~100 MB | Instant responses, good for testing |
+| SmolLM2 360M | ~220 MB | Lightweight |
+| Llama 3.2 1B | ~700 MB | Practical quality |
+| Qwen 2.5 1.5B | ~1 GB | Good balance |
+| Qwen 2.5 3B | ~1.8 GB | Solid quality |
+| Phi 3.5 Mini | ~2.3 GB | Microsoft's compact model |
+| Gemma 2 2B | ~1.4 GB | Google's efficient model |
+| Llama 3.2 3B | ~1.8 GB | Strong reasoning |
+| Qwen 2.5 7B | ~4 GB | Needs 8GB+ VRAM |
+| Llama 3.1 8B | ~4.5 GB | Needs 8GB+ VRAM |
+
+Models are pre-compiled by [MLC AI](https://github.com/mlc-ai/web-llm) into WebGPU shaders. First download is cached in the browser (IndexedDB) -- subsequent loads are instant.
+
+**Remote access:** The server binds to `0.0.0.0:8095` by default, so you can open `http://<machine-IP>:8095` from another device. For example, run the server on an RK3588 board, then open the page from a Windows laptop with an RTX GPU -- the WebGPU inference will run on the laptop's GPU, not the board.
+
+**When to use which mode:**
+
+- **Browser mode**: Quick testing, no-install setups, privacy-sensitive work, machines without compiled llama.cpp
+- **Server mode** (llama.cpp): Larger models (27B+), fine-grained runtime control, benchmarking, RK3588-tuned presets, custom flags
+
+**Browser compatibility:**
+
+| Browser | WebGPU Status |
+|---------|--------------|
+| Chrome 113+ | Enabled by default |
+| Edge 113+ | Enabled by default |
+| Firefox | Behind `dom.webgpu.enabled` flag in `about:config` |
+| Safari | Limited support |
+
+Check [WebGPU Report](https://webgpureport.org/) to verify your browser's WebGPU support.
+
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                      Browser (Client)                       │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  llama-webui  │  Chat UI  │  Model Settings  │ Logs │   │
-│  └───────────────┴───────────┴──────────────────┴──────┘   │
+┌───────────────────────────────────────────────────────────────┐
+│                       Browser (Client)                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │  llama-webui  │  Chat UI  │  Model Settings  │  Logs   │ │
+│  └────────────────┴──────────┴──────────────────┴─────────┘ │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Browser Inference (WebGPU)                          │   │
+│  │  @mlc-ai/web-llm  →  WebGPU shaders  →  local GPU   │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────┬──────────────────────────────────┬───────────────┘
+           │ HTTP / SSE (server mode)         │ WebGPU (browser mode)
+┌──────────▼──────────────────────────────────┘
+│                     FastAPI Server
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│  │ Chat Router  │  │Model Manager │  │Download Manager  │
+│  │   (SSE)      │  │              │  │                  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│  │  App State   │  │   Settings   │  │ Model Inventory  │
+│  │  (SQLite)    │  │   (.env)     │  │  + VRAM Est.     │
+│  └──────────────┘  └──────────────┘  └──────────────────┘
 └────────────────────────────┬────────────────────────────────┘
-                             │ HTTP / SSE
-┌────────────────────────────▼────────────────────────────────┐
-│                     FastAPI Server                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ Chat Router  │  │Model Manager │  │Download Manager  │  │
-│  │   (SSE)      │  │              │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  App State   │  │   Settings   │  │ Model Inventory  │  │
-│  │  (SQLite)    │  │   (.env)     │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└────────────────────────────┬────────────────────────────────┘
-                             │ Subprocess / IPC
+                             │ Subprocess / IPC (server mode only)
 ┌────────────────────────────▼────────────────────────────────┐
 │                    llama.cpp (Binary)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
@@ -312,6 +378,9 @@ Reason:
 | Persistent chats | ✅ Production-ready |
 | Model scanning/loading | ✅ Production-ready |
 | Streaming responses | ✅ Production-ready |
+| Browser inference (WebGPU) | ✅ Available |
+| VRAM estimation per model | ✅ Available |
+| MoE / REAP model detection | ✅ Available |
 | Benchmark helpers | ✅ Production-ready |
 | RK3588-tuned presets | ✅ Production-ready |
 | Windows setup flow | ✅ Available |
@@ -337,6 +406,8 @@ MIT
 ## Related Links
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp)
+- [WebLLM (browser inference)](https://github.com/mlc-ai/web-llm)
+- [WebGPU Report](https://webgpureport.org/)
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md)
 - [GLM-4.7-Flash-REAP-23B-A3B on Hugging Face](https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B)
