@@ -64,6 +64,26 @@ class LlamaServerManager:
             body = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"llama.cpp HTTP {error.code}: {body}") from error
 
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        if os.name == "nt":
+            try:
+                import ctypes
+
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                handle = kernel32.OpenProcess(0x0400, False, pid)
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return True
+                return False
+            except Exception:
+                return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
     def _managed_pid(self) -> int | None:
         if self.process and self.process.poll() is None:
             return self.process.pid
@@ -71,9 +91,7 @@ class LlamaServerManager:
             pid = int(self.pid_path.read_text().strip())
         except (FileNotFoundError, ValueError):
             return None
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if not self._pid_exists(pid):
             with suppress(FileNotFoundError):
                 self.pid_path.unlink()
             return None
@@ -120,8 +138,12 @@ class LlamaServerManager:
         gpu_backend = str(config.get("gpu_backend") or "auto").strip()
         if gpu_backend not in ("auto", ""):
             args.extend([f"--{gpu_backend}"])
-        if str(config.get("custom_args") or "").strip():
-            args.extend(shlex.split(str(config["custom_args"])))
+        custom_args_str = str(config.get("custom_args") or "").strip()
+        if custom_args_str:
+            if os.name == "nt":
+                args.extend(custom_args_str.split())
+            else:
+                args.extend(shlex.split(custom_args_str))
 
         log_handle = self.log_path.open("ab")
         self.process = subprocess.Popen(args, stdout=log_handle, stderr=log_handle)
@@ -141,24 +163,40 @@ class LlamaServerManager:
             time.sleep(1)
         raise RuntimeError(last_error)
 
-    def stop(self) -> None:
-        self.stop_generation()
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
+    def _terminate_pid(self, pid: int) -> None:
+        if os.name == "nt":
+            with suppress(OSError, subprocess.TimeoutExpired):
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
         else:
-            managed_pid = self._managed_pid()
-            if managed_pid is not None:
-                with suppress(ProcessLookupError):
-                    os.kill(managed_pid, signal.SIGTERM)
-        self.process = None
-        self.started_with = None
-        with suppress(FileNotFoundError):
-            self.pid_path.unlink()
+            with suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGTERM)
+
+    def stop(self) -> None:
+        try:
+            self.stop_generation()
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=5)
+            else:
+                managed_pid = self._managed_pid()
+                if managed_pid is not None:
+                    self._terminate_pid(managed_pid)
+        except Exception:
+            pass
+        finally:
+            self.process = None
+            self.started_with = None
+            with suppress(FileNotFoundError):
+                self.pid_path.unlink()
 
     def stop_generation(self) -> bool:
         with self._active_lock:
