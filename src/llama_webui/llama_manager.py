@@ -103,7 +103,7 @@ class LlamaServerManager:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         args: list[str] = []
         cpu_mask = str(config.get("cpu_mask") or "").strip()
-        if cpu_mask:
+        if cpu_mask and os.name != "nt":
             args.extend(["taskset", "-c", cpu_mask])
         args.extend([
             str(config["llama_binary"]),
