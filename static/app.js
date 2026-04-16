@@ -7,6 +7,11 @@ const state = {
   models: [],
   downloads: [],
   modelPresets: [],
+  browserEngine: null,
+  browserModelId: null,
+  browserMode: false,
+  _pendingRender: null,
+  _rafId: null,
 };
 
 const markdown = window.markdownit({
@@ -28,6 +33,14 @@ const fields = [
   "parallel", "batch_size", "ubatch_size", "temperature", "top_p", "top_k", "min_p",
   "repeat_penalty", "presence_penalty", "max_tokens", "custom_args", "system_prompt"
 ];
+
+/* ── helpers ── */
+
+function escapeHtml(str) {
+  const el = document.createElement("span");
+  el.textContent = str;
+  return el.innerHTML;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -56,6 +69,8 @@ async function parseErrorResponse(response) {
     return raw;
   }
 }
+
+/* ── config form ── */
 
 function readConfigForm() {
   const config = {};
@@ -94,6 +109,7 @@ function writeConfigForm(config, candidateModels = [], modelPresets = []) {
     const option = document.createElement("option");
     option.value = preset.id;
     option.textContent = `${preset.label} - ${preset.description}`;
+    option.dataset.presetId = preset.id;
     presetSelect.appendChild(option);
   }
 
@@ -115,6 +131,12 @@ function renderLoadedModelSummary() {
   const metaEl = document.getElementById("loaded-model-meta");
   if (!nameEl || !metaEl || !state.config) return;
 
+  if (state.browserMode) {
+    nameEl.textContent = state.browserModelId || "Browser Model";
+    metaEl.textContent = "WebGPU · in-browser";
+    return;
+  }
+
   const modelPath = String(state.config.model_path || "");
   nameEl.textContent = basename(modelPath) || "Unknown";
 
@@ -125,29 +147,64 @@ function renderLoadedModelSummary() {
   metaEl.textContent = parts.join(" · ");
 }
 
+/* ── model library ── */
+
 function renderModelLibrary() {
   const container = document.getElementById("model-library");
   container.innerHTML = "";
   const selectedPath = document.getElementById("model_path").value || "";
 
+  const frag = document.createDocumentFragment();
   for (const model of state.models) {
     const card = document.createElement("div");
     card.className = `model-card ${selectedPath === model.path ? "active" : ""}`;
-    card.innerHTML = `
-      <div class="card-title">${model.name}</div>
-      <div class="card-meta">${formatGiB(model.size_bytes)}${model.is_reap ? " · REAP" : ""}${model.is_a3b ? " · A3B" : ""}</div>
-      <div class="card-meta">${model.path}</div>
-      <div class="card-actions">
-        <button type="button">Use This</button>
-      </div>
-    `;
-    card.querySelector("button").onclick = () => {
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = model.name;
+
+    const meta = document.createElement("div");
+    meta.className = "card-meta";
+    const tags = [formatGiB(model.size_bytes)];
+    if (model.is_reap) tags.push("REAP");
+    if (model.is_a3b) tags.push("A3B");
+    if (model.is_moe) tags.push("MoE");
+    meta.textContent = tags.join(" · ");
+
+    const vramEl = document.createElement("div");
+    vramEl.className = "card-meta";
+    if (model.vram) {
+      const v = model.vram;
+      const fits = [];
+      if (v.fits_4gb) fits.push("4GB");
+      if (v.fits_8gb) fits.push("8GB");
+      if (v.fits_12gb) fits.push("12GB");
+      if (v.fits_16gb) fits.push("16GB");
+      if (v.fits_24gb) fits.push("24GB");
+      vramEl.textContent = `~${v.min_vram_gib} GiB VRAM · fits: ${fits.length ? fits.join(", ") : "needs >24GB"}`;
+    } else {
+      vramEl.textContent = "";
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Use This";
+    btn.onclick = () => {
       document.getElementById("model_path").value = model.path;
       renderModelLibrary();
       setStatus(`Selected ${model.name}`);
     };
-    container.appendChild(card);
+    actions.appendChild(btn);
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(vramEl);
+    card.appendChild(actions);
+    frag.appendChild(card);
   }
+  container.appendChild(frag);
 }
 
 function renderDownloads() {
@@ -158,18 +215,30 @@ function renderDownloads() {
     return;
   }
 
+  const frag = document.createDocumentFragment();
   for (const job of state.downloads) {
     const card = document.createElement("div");
     card.className = "download-card";
     const logTail = (job.log_tail || []).slice(-6).join("\n");
-    card.innerHTML = `
-      <div class="card-title">${job.status.toUpperCase()}</div>
-      <div class="card-meta">${job.destination_path}</div>
-      <div class="card-meta">${job.downloaded_bytes ? formatGiB(job.downloaded_bytes) : "0.00 GiB"} downloaded</div>
-      <div class="log-tail">${logTail || "Waiting for log output..."}</div>
-      <div class="card-actions"></div>
-    `;
-    const actions = card.querySelector(".card-actions");
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = job.status.toUpperCase();
+
+    const meta = document.createElement("div");
+    meta.className = "card-meta";
+    meta.textContent = job.destination_path;
+
+    const size = document.createElement("div");
+    size.className = "card-meta";
+    size.textContent = `${job.downloaded_bytes ? formatGiB(job.downloaded_bytes) : "0.00 GiB"} downloaded`;
+
+    const log = document.createElement("div");
+    log.className = "log-tail";
+    log.textContent = logTail || "Waiting for log output...";
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
     if (job.status === "running") {
       const cancel = document.createElement("button");
       cancel.textContent = "Cancel";
@@ -179,33 +248,48 @@ function renderDownloads() {
       };
       actions.appendChild(cancel);
     }
-    container.appendChild(card);
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(size);
+    card.appendChild(log);
+    card.appendChild(actions);
+    frag.appendChild(card);
   }
+  container.appendChild(frag);
 }
+
+/* ── chat list ── */
 
 function renderChats() {
   const chatList = document.getElementById("chat-list");
   chatList.innerHTML = "";
+  const frag = document.createDocumentFragment();
   for (const chat of state.chats) {
     const item = document.createElement("div");
     item.className = `chat-item ${chat.chat_id === state.currentChatId ? "active" : ""}`;
     item.textContent = chat.title;
     item.onclick = () => loadChat(chat.chat_id);
-    chatList.appendChild(item);
+    frag.appendChild(item);
   }
+  chatList.appendChild(frag);
 }
+
+/* ── messages: performance-critical rendering ── */
 
 function renderMessages(chat) {
   document.getElementById("chat-title").textContent = chat.title;
   const container = document.getElementById("messages");
   container.innerHTML = "";
+  const frag = document.createDocumentFragment();
   for (const message of chat.messages) {
     const el = document.createElement("div");
     el.className = `message ${message.role}`;
     renderMessageContent(el, message.content);
-    container.appendChild(el);
+    frag.appendChild(el);
   }
-  container.scrollTop = container.scrollHeight;
+  container.appendChild(frag);
+  requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
 }
 
 function appendLiveMessage(role, content = "", options = {}) {
@@ -217,7 +301,7 @@ function appendLiveMessage(role, content = "", options = {}) {
   }
   renderMessageContent(el, content);
   container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
   return el;
 }
 
@@ -234,6 +318,36 @@ function renderMessageContent(element, content) {
   delete element.dataset.pending;
   element.innerHTML = markdown.render(safeContent);
 }
+
+/* Streaming: fast-path that only appends new text instead of re-rendering everything */
+let _streamBuffer = "";
+let _streamElement = null;
+let _streamRenderScheduled = false;
+
+function streamAppendDelta(delta) {
+  _streamBuffer += delta;
+  if (!_streamRenderScheduled) {
+    _streamRenderScheduled = true;
+    requestAnimationFrame(renderStreamBuffer);
+  }
+}
+
+function renderStreamBuffer() {
+  _streamRenderScheduled = false;
+  if (!_streamElement) return;
+  delete _streamElement.dataset.pending;
+  _streamElement.innerHTML = markdown.render(_streamBuffer);
+  const container = document.getElementById("messages");
+  container.scrollTop = container.scrollHeight;
+}
+
+function streamReset() {
+  _streamBuffer = "";
+  _streamElement = null;
+  _streamRenderScheduled = false;
+}
+
+/* ── status helpers ── */
 
 function formatLatencyMs(ms) {
   return `${(Number(ms) / 1000).toFixed(2)} s`;
@@ -258,6 +372,8 @@ function setGenerating(active) {
   button.classList.toggle("stop", active);
 }
 
+/* ── prompt presets ── */
+
 function loadPromptPresets() {
   const select = document.getElementById("prompt-presets");
   select.innerHTML = `<option value="">Choose a test prompt...</option>`;
@@ -269,12 +385,15 @@ function loadPromptPresets() {
   }
 }
 
+/* ── API refresh calls ── */
+
 async function refreshConfig() {
   const data = await api("/api/config");
   writeConfigForm(data.config, data.candidate_models, data.model_presets || []);
 }
 
 async function refreshModels() {
+  if (document.hidden) return;
   const data = await api("/api/models");
   state.models = data.models;
   state.downloads = data.downloads;
@@ -314,6 +433,8 @@ async function createChat() {
   await refreshChats();
   await loadChat(data.chat.chat_id);
 }
+
+/* ── server mode actions ── */
 
 async function saveConfig() {
   const config = readConfigForm();
@@ -403,10 +524,13 @@ async function stopGeneration() {
   if (!state.generating) return;
   state.stopRequested = true;
   setChatStatus("Stopping...", true);
+  if (state.browserMode) return;
   await api("/api/generation/stop", { method: "POST" });
 }
 
-async function streamChat(chatId, content, assistantEl) {
+/* ── streaming: server mode ── */
+
+async function streamChatServer(chatId, content, assistantEl) {
   const response = await fetch(`/api/chats/${chatId}/messages/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -432,11 +556,11 @@ async function streamChat(chatId, content, assistantEl) {
       if (rawLine) {
         const event = JSON.parse(rawLine);
         if (event.type === "delta") {
-          renderMessageContent(assistantEl, event.content);
-          const container = document.getElementById("messages");
-          container.scrollTop = container.scrollHeight;
-          setChatStatus(`Generating... ${event.content.length} chars`, true);
+          streamAppendDelta(event.delta);
+          setChatStatus(`Generating... ${_streamBuffer.length} chars`, true);
         } else if (event.type === "done") {
+          renderStreamBuffer();
+          streamReset();
           await refreshChats();
           renderMessages(event.chat);
           setChatStatus(event.cancelled ? `Stopped after ${formatLatencyMs(event.latency_ms)}` : `Done in ${formatLatencyMs(event.latency_ms)}`);
@@ -450,6 +574,44 @@ async function streamChat(chatId, content, assistantEl) {
   }
 }
 
+/* ── streaming: browser mode via WebLLM ── */
+
+async function streamChatBrowser(content, assistantEl) {
+  if (!state.browserEngine) throw new Error("No browser model loaded");
+  const config = state.config || {};
+  const messages = [];
+  const sys = String(config.system_prompt || "").trim();
+  if (sys) messages.push({ role: "system", content: sys });
+  messages.push({ role: "user", content });
+
+  const chunks = await state.browserEngine.chat.completions.create({
+    messages,
+    temperature: Number(config.temperature) || 1.0,
+    top_p: Number(config.top_p) || 0.95,
+    stream: true,
+  });
+
+  for await (const chunk of chunks) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    if (delta) {
+      streamAppendDelta(delta);
+      setChatStatus(`Generating... ${_streamBuffer.length} chars`, true);
+    }
+    if (state.stopRequested) {
+      state.browserEngine?.interruptGenerate();
+      break;
+    }
+  }
+
+  renderStreamBuffer();
+  const finalContent = _streamBuffer;
+  streamReset();
+  setChatStatus("Done (browser)");
+  return finalContent;
+}
+
+/* ── send message ── */
+
 async function sendMessage() {
   const input = document.getElementById("message-input");
   if (state.generating) {
@@ -459,22 +621,35 @@ async function sendMessage() {
 
   const content = input.value.trim();
   if (!content) return;
-  if (!state.currentChatId) {
+
+  if (!state.browserMode && !state.currentChatId) {
     await createChat();
   }
 
   appendLiveMessage("user", content);
   const assistantEl = appendLiveMessage("assistant", "", { pending: true });
+  streamReset();
+  _streamElement = assistantEl;
+
   input.value = "";
   state.stopRequested = false;
   setGenerating(true);
   setChatStatus("Generating...", true);
+
   try {
-    await streamChat(state.currentChatId, content, assistantEl);
+    if (state.browserMode) {
+      await streamChatBrowser(content, assistantEl);
+    } else {
+      await streamChatServer(state.currentChatId, content, assistantEl);
+    }
   } catch (error) {
     const cancelledByUser = state.stopRequested;
+    renderStreamBuffer();
+    streamReset();
     setChatStatus(cancelledByUser ? "Stopped" : error.message, !cancelledByUser);
-    await loadChat(state.currentChatId);
+    if (!state.browserMode && state.currentChatId) {
+      await loadChat(state.currentChatId);
+    }
   } finally {
     state.stopRequested = false;
     setGenerating(false);
@@ -493,6 +668,93 @@ async function runPreset() {
   applyPresetToComposer();
   await sendMessage();
 }
+
+/* ── browser inference: WebLLM ── */
+
+const BROWSER_MODELS = [
+  { id: "SmolLM2-135M-Instruct-q4f16_1-MLC", label: "SmolLM2 135M (test)", size: "~100MB" },
+  { id: "SmolLM2-360M-Instruct-q4f16_1-MLC", label: "SmolLM2 360M", size: "~220MB" },
+  { id: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B", size: "~700MB" },
+  { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B", size: "~1.8GB" },
+  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 1.5B", size: "~1GB" },
+  { id: "Qwen2.5-3B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 3B", size: "~1.8GB" },
+  { id: "Qwen2.5-7B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 7B", size: "~4GB" },
+  { id: "Phi-3.5-mini-instruct-q4f16_1-MLC", label: "Phi 3.5 Mini 3.8B", size: "~2.3GB" },
+  { id: "Llama-3.1-8B-Instruct-q4f16_1-MLC", label: "Llama 3.1 8B", size: "~4.5GB" },
+  { id: "gemma-2-2b-it-q4f16_1-MLC", label: "Gemma 2 2B", size: "~1.4GB" },
+];
+
+function populateBrowserModels() {
+  const select = document.getElementById("browser-model-select");
+  select.innerHTML = '<option value="">Choose a model...</option>';
+  for (const m of BROWSER_MODELS) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = `${m.label} (${m.size})`;
+    select.appendChild(opt);
+  }
+}
+
+function detectWebGPU() {
+  return !!navigator.gpu;
+}
+
+async function initBrowserMode() {
+  if (!detectWebGPU()) {
+    setBrowserStatus("WebGPU not available in this browser", false);
+    return;
+  }
+
+  setBrowserStatus("Loading WebLLM engine...", true);
+
+  try {
+    const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+
+    state.browserEngine = new webllm.MLCEngine({
+      initProgressCallback: (progress) => {
+        const msg = progress.text || `Loading: ${Math.round((progress.progress || 0) * 100)}%`;
+        setBrowserStatus(msg, true);
+      },
+    });
+
+    state.browserMode = true;
+    populateBrowserModels();
+    setBrowserStatus("WebLLM ready. Select a model to load.", true);
+    document.getElementById("browser-section").classList.add("active");
+    renderLoadedModelSummary();
+  } catch (err) {
+    setBrowserStatus(`WebLLM load failed: ${err.message}`, false);
+  }
+}
+
+async function loadBrowserModel() {
+  const modelId = document.getElementById("browser-model-select").value;
+  if (!modelId || !state.browserEngine) return;
+
+  setBrowserStatus(`Downloading ${modelId}...`, true);
+  setGenerating(true);
+
+  try {
+    await state.browserEngine.reload(modelId);
+    state.browserModelId = modelId;
+    setBrowserStatus(`Loaded: ${modelId}`, true);
+    renderLoadedModelSummary();
+    setStatus(`Browser model: ${modelId}`);
+  } catch (err) {
+    setBrowserStatus(`Failed: ${err.message}`, false);
+  } finally {
+    setGenerating(false);
+  }
+}
+
+function setBrowserStatus(text, ok) {
+  const el = document.getElementById("browser-status");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? "#5ee17f" : "#ff948c";
+}
+
+/* ── event bindings ── */
 
 document.getElementById("new-chat").onclick = createChat;
 document.getElementById("save-config").onclick = saveConfig;
@@ -520,8 +782,18 @@ document.getElementById("message-input").addEventListener("keydown", async (even
   }
 });
 
+document.getElementById("init-browser").onclick = initBrowserMode;
+document.getElementById("load-browser-model").onclick = loadBrowserModel;
+
+/* ── init ── */
+
 (async function init() {
   loadPromptPresets();
+
+  if (detectWebGPU()) {
+    document.getElementById("browser-section").classList.add("available");
+  }
+
   await refreshConfig();
   await refreshModels();
   await refreshChats();
@@ -529,5 +801,6 @@ document.getElementById("message-input").addEventListener("keydown", async (even
   if (state.chats.length > 0) {
     await loadChat(state.chats[0].chat_id);
   }
+
   setInterval(refreshModels, 5000);
 })();

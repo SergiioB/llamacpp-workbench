@@ -18,6 +18,17 @@
           <button id="start-server">Start</button>
           <button id="stop-server">Stop</button>
         </div>
+        <div id="browser-section" class="browser-section">
+          <div class="browser-header">Browser Inference (WebGPU)</div>
+          <div id="browser-status" class="browser-status">Not initialized</div>
+          <div class="browser-controls">
+            <button id="init-browser">Enable Browser Mode</button>
+          </div>
+          <div class="browser-model-row">
+            <select id="browser-model-select" disabled></select>
+            <button id="load-browser-model" disabled>Load</button>
+          </div>
+        </div>
         <div id="chat-list" class="chat-list"></div>
       </aside>
 

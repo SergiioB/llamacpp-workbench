@@ -36,6 +36,10 @@ body {
 .sidebar {
   border-right: 1px solid var(--border);
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  contain: layout style;
 }
 
 .sidebar-header,
@@ -60,12 +64,68 @@ body {
 }
 
 .server-strip {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
+
+/* ── browser inference section ── */
+
+.browser-section {
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: rgba(15, 20, 26, 0.55);
+}
+
+.browser-section.available {
+  display: block;
+}
+
+.browser-section.active {
+  border-color: #5ee17f;
+}
+
+.browser-header {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.browser-status {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+  min-height: 1.2em;
+}
+
+.browser-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.browser-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.browser-model-row select {
+  flex: 1;
+}
+
+/* ── chat list ── */
 
 .chat-list {
   display: grid;
   gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  contain: layout style;
 }
 
 .chat-item {
@@ -74,11 +134,14 @@ body {
   border-radius: 10px;
   background: var(--panel-2);
   cursor: pointer;
+  contain: layout style;
 }
 
 .chat-item.active {
   border-color: var(--accent);
 }
+
+/* ── main panel ── */
 
 .main-panel {
   display: grid;
@@ -166,7 +229,8 @@ body {
   display: grid;
   gap: 10px;
   max-height: 260px;
-  overflow: auto;
+  overflow-y: auto;
+  contain: layout style;
 }
 
 .model-card,
@@ -175,6 +239,7 @@ body {
   border-radius: 12px;
   padding: 12px;
   background: var(--panel-2);
+  contain: layout style;
 }
 
 .model-card.active {
@@ -242,6 +307,8 @@ button.stop {
   color: #fff7f4;
 }
 
+/* ── chat panel: performance-critical ── */
+
 .chat-panel {
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -287,9 +354,12 @@ button.stop {
 
 .messages {
   padding: 16px 20px;
-  overflow: auto;
+  overflow-y: auto;
   display: grid;
   gap: 8px;
+  align-content: start;
+  contain: layout style;
+  will-change: scroll-position;
 }
 
 .message {
@@ -302,6 +372,7 @@ button.stop {
   justify-self: start;
   align-self: start;
   overflow-wrap: anywhere;
+  contain: layout style;
 }
 
 .message.user {
@@ -364,7 +435,7 @@ button.stop {
 }
 
 .message pre {
-  overflow: auto;
+  overflow-x: auto;
   padding: 12px 14px;
   border-radius: 12px;
   background: #0f141a;
