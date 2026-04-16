@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .settings import GPU_BACKEND, model_roots
+from .settings import GPU_BACKEND, IS_RK3588, model_roots
 
 LEGACY_DEFAULT_MODEL_FILENAMES: set[str] = set()
 
 
 def _name(model_path: str) -> str:
     return Path(model_path).name.lower()
+
+
+def _rk3588_profile() -> dict[str, Any]:
+    if IS_RK3588:
+        return {"cpu_mask": "4-7", "threads": 4}
+    detected_cpus = os.cpu_count() or 4
+    return {"cpu_mask": "", "threads": max(1, min(4, detected_cpus))}
+
+
+def _rk3588_custom_args() -> str:
+    if IS_RK3588:
+        return "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none"
+    return "--cache-type-k q8_0 --cache-type-v q4_0"
 
 
 def _is_glm_flash_reap(model_path: str) -> bool:
@@ -118,6 +132,44 @@ def scan_models() -> list[dict[str, Any]]:
     return sorted(models, key=lambda model: model["sort_key"], reverse=True)
 
 
+def _apply_cpu_model_profile(
+    tuned: dict[str, Any],
+    *,
+    ctx_size: int,
+    batch_size: int = 128,
+    ubatch_size: int = 32,
+    max_tokens: int = 1024,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    repeat_penalty: float | None = None,
+    presence_penalty: float | None = None,
+) -> dict[str, Any]:
+    profile = _rk3588_profile()
+    profile.update(
+        {
+            "ctx_size": ctx_size,
+            "parallel": 1,
+            "batch_size": batch_size,
+            "ubatch_size": ubatch_size,
+            "max_tokens": max_tokens,
+            "custom_args": _rk3588_custom_args(),
+        }
+    )
+    if temperature is not None:
+        profile["temperature"] = temperature
+    if top_p is not None:
+        profile["top_p"] = top_p
+    if top_k is not None:
+        profile["top_k"] = top_k
+    if repeat_penalty is not None:
+        profile["repeat_penalty"] = repeat_penalty
+    if presence_penalty is not None:
+        profile["presence_penalty"] = presence_penalty
+    tuned.update(profile)
+    return tuned
+
+
 def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, Any]:
     tuned = {**config, "model_path": model_path}
     lower = _name(model_path)
@@ -126,100 +178,63 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
         return _cuda_profile_for_model(tuned, lower, model_path)
 
     if _is_glm_flash_reap(model_path):
-        tuned.update(
-            {
-                "ctx_size": 202752,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 128,
-                "ubatch_size": 32,
-                "temperature": 1.0,
-                "top_p": 0.95,
-                "top_k": 40,
-                "min_p": 0.0,
-                "repeat_penalty": 1.0,
-                "presence_penalty": 0.0,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=202752,
+            batch_size=128,
+            ubatch_size=32,
+            max_tokens=1024,
+            temperature=1.0,
+            top_p=0.95,
+            top_k=40,
+            repeat_penalty=1.0,
+            presence_penalty=0.0,
         )
-        return tuned
 
     if _is_qwen_27b(model_path) or "27b" in lower:
-        tuned.update(
-            {
-                "ctx_size": 4096,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 128,
-                "ubatch_size": 32,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=4096,
+            batch_size=128,
+            ubatch_size=32,
+            max_tokens=1024,
         )
-        return tuned
 
     if "9b" in lower or "8b" in lower or "7b" in lower:
-        tuned.update(
-            {
-                "ctx_size": 8192,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 256,
-                "ubatch_size": 64,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=8192,
+            batch_size=256,
+            ubatch_size=64,
+            max_tokens=1024,
         )
-        return tuned
 
     if "4b" in lower:
-        tuned.update(
-            {
-                "ctx_size": 16384,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 256,
-                "ubatch_size": 64,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=16384,
+            batch_size=256,
+            ubatch_size=64,
+            max_tokens=1024,
         )
-        return tuned
 
     if any(size_hint in lower for size_hint in ("3b", "2b", "1.7b")):
-        tuned.update(
-            {
-                "ctx_size": 32768,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 256,
-                "ubatch_size": 64,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=32768,
+            batch_size=256,
+            ubatch_size=64,
+            max_tokens=1024,
         )
-        return tuned
 
     if "0.8b" in lower:
-        tuned.update(
-            {
-                "ctx_size": 16384,
-                "threads": 4,
-                "cpu_mask": "4-7",
-                "parallel": 1,
-                "batch_size": 256,
-                "ubatch_size": 64,
-                "max_tokens": 1024,
-                "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
-            }
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=16384,
+            batch_size=256,
+            ubatch_size=64,
+            max_tokens=1024,
         )
-        return tuned
 
     return tuned
 

@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .model_inventory import list_candidate_models, normalize_model_path
-from .settings import GPU_BACKEND, data_dir, resolve_llama_server_binary
+from .settings import GPU_BACKEND, IS_RK3588, data_dir, resolve_llama_server_binary
+
+
+def _rk3588_custom_args() -> str:
+    if IS_RK3588:
+        return "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none"
+    return "--cache-type-k q8_0 --cache-type-v q4_0"
 
 
 def default_config() -> dict[str, Any]:
@@ -19,6 +25,7 @@ def default_config() -> dict[str, Any]:
     parallel = 4 if GPU_BACKEND == "cuda" else 1
     batch_size = 512 if GPU_BACKEND == "cuda" else 128
     ubatch_size = 128 if GPU_BACKEND == "cuda" else 32
+    cpu_mask = "4-7" if IS_RK3588 else ""
     return {
         "bind_host": "0.0.0.0",
         "bind_port": 8095,
@@ -26,7 +33,7 @@ def default_config() -> dict[str, Any]:
         "llama_port": 8085,
         "llama_binary": resolve_llama_server_binary(),
         "model_path": normalize_model_path(None, candidates),
-        "cpu_mask": "4-7",
+        "cpu_mask": cpu_mask,
         "ctx_size": 2048,
         "threads": cpu_threads,
         "gpu_layers": gpu_layers,
@@ -41,7 +48,7 @@ def default_config() -> dict[str, Any]:
         "presence_penalty": 0.0,
         "max_tokens": 512,
         "system_prompt": "",
-        "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none",
+        "custom_args": _rk3588_custom_args(),
     }
 
 

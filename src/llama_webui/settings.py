@@ -36,7 +36,17 @@ def _detect_gpu_backend() -> Literal["cuda", "rocm", "metal", "cpu"]:
     return "cpu"
 
 
+def _is_rk3588() -> bool:
+    try:
+        with open("/proc/device-tree/compatible", "rb") as f:
+            compatible = f.read().decode("ascii", errors="replace").lower()
+            return "rk3588" in compatible
+    except (FileNotFoundError, OSError, PermissionError):
+        return False
+
+
 GPU_BACKEND: Literal["cuda", "rocm", "metal", "cpu"] = _detect_gpu_backend()
+IS_RK3588: bool = _is_rk3588()
 
 
 def data_dir() -> Path:
