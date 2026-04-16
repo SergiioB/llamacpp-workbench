@@ -1,14 +1,17 @@
-# Windows Setup Guide for llama-webui with RTX 5060
+# Windows Setup Guide for llama-webui
 
-This guide documents the complete setup process for running `llama-webui` on Windows with an NVIDIA RTX 5060 Laptop GPU (dual GPU system with Intel Arc iGPU + NVIDIA dGPU).
+This guide covers setting up `llama-webui` on Windows with NVIDIA GPU acceleration via CUDA.
 
-## Hardware Configuration
+## Hardware Requirements
 
-- **CPU**: Intel Core Ultra 9 285H
-- **iGPU**: Intel Arc 140T GPU (16GB) - Used for power saving
-- **dGPU**: NVIDIA GeForce RTX 5060 Laptop GPU - For CUDA acceleration
-- **Architecture**: Blackwell (compute capability 12.0)
-- **RAM**: ~32 GB
+- **GPU**: Any NVIDIA GPU with CUDA support (compute capability 6.0+)
+- **VRAM**: 4 GB minimum; 8 GB+ recommended for 7B+ models
+- **RAM**: 8 GB minimum; 16 GB+ recommended
+- **CPU**: Any modern x86_64 processor
+
+### Dual GPU Laptops
+
+On laptops with both an integrated GPU (Intel/AMD) and an NVIDIA discrete GPU, Windows may default to the integrated GPU for power saving. You will need to force NVIDIA GPU usage (see the [Dual GPU Configuration](#gpu-configuration-for-dual-gpu-laptops) section below).
 
 ## Prerequisites
 
@@ -17,28 +20,19 @@ This guide documents the complete setup process for running `llama-webui` on Win
 The following components must be installed before building or running llama.cpp with GPU support:
 
 #### 1. NVIDIA GPU Driver
-**Status**: Driver files exist but GPU shows "Unknown" status
-
-**Issue**: In dual GPU laptops, the NVIDIA GPU may be in power-saving mode
-
-**Resolution**:
-```powershell
-# Check GPU status
-Get-PnpDevice -Class Display | Select-Object Name, Status
-
-# If NVIDIA GPU shows "Unknown", you may need to:
-# 1. Open NVIDIA Control Panel
-# 2. Set preferred GPU to "High-performance NVIDIA processor"
-# 3. Or disable Intel GPU in BIOS if mux switch is available
-```
 
 **Download**: https://www.nvidia.com/drivers
 
-#### 2. CUDA Toolkit
-**Status**: NOT INSTALLED
-**Path Checked**: `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA`
+**Verification**:
+```powershell
+nvidia-smi
+```
 
-**Required Version**: CUDA 12.8 or later (for RTX 5060 Blackwell architecture)
+If the GPU shows as "Unknown" in Device Manager on dual-GPU laptops, see the troubleshooting section below.
+
+#### 2. CUDA Toolkit
+
+**Required Version**: CUDA 12.4 or later. Use CUDA 12.8+ for RTX 50-series (Blackwell) GPUs.
 
 **Download**: https://developer.nvidia.com/cuda-downloads
 
@@ -48,7 +42,7 @@ nvcc --version
 ```
 
 #### 3. CMake
-**Status**: NOT INSTALLED
+
 **Required Version**: 3.18 or later
 
 **Installation Options**:
@@ -65,7 +59,6 @@ cmake --version
 ```
 
 #### 4. Visual Studio 2022 Build Tools
-**Status**: NOT INSTALLED
 
 **Required Components**:
 - MSVC v143 - VS 2022 C++ x64/x86 build tools
@@ -114,17 +107,18 @@ This installs:
 - `fastapi>=0.115.0`
 - `uvicorn>=0.30.0`
 
-### Step 4: Clone llama.cpp
+### Step 4: Build llama.cpp with CUDA Support
+
+**Option A: Use the setup script (recommended)**
+
+```powershell
+.\scripts\setup_windows.ps1
+```
+
+**Option B: Build from source manually**
 
 ```powershell
 git clone https://github.com/ggerganov/llama.cpp.git third_party\llama.cpp
-```
-
-### Step 5: Build llama.cpp with CUDA Support
-
-**Prerequisites**: Ensure CUDA, CMake, and MSVC are installed
-
-```powershell
 cd third_party\llama.cpp
 mkdir build-cuda
 cd build-cuda
@@ -142,28 +136,20 @@ cmake --build . --config Release -j
 - `llama-server.exe` in `build-cuda\bin\Release\` or `build-cuda\bin\`
 - `llama-cli.exe` in same directory
 
-### Alternative: Use Pre-built Binaries
-
-If building from source fails, download pre-built binaries:
+**Option C: Use Pre-built Binaries**
 
 ```powershell
-# Download from GitHub releases
-curl.exe -L -o llama-bin.zip https://github.com/ggml-org/llama.cpp/releases/download/b8599/llama-b8599-bin-win-cuda-12.4-x64.zip
-
-# Also download CUDA runtime DLLs if needed
-curl.exe -L -o cudart.zip https://github.com/ggml-org/llama.cpp/releases/download/b8599/cudart-llama-bin-win-cuda-12.4-x64.zip
-
-# Extract
-Expand-Archive llama-bin.zip -DestinationPath .\third_party\llama.cpp\prebuilt
-Expand-Archive cudart.zip -DestinationPath .\third_party\llama.cpp\prebuilt
+.\scripts\setup_windows.ps1 -UsePrebuilt
 ```
 
-### Step 6: Configure Environment Variables
+Or download manually from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases). Choose the file matching your CUDA version (e.g., `llama-bXXXX-bin-win-cuda-cu12.4-x64.zip`).
+
+### Step 5: Configure Environment Variables
 
 Create a `.env` file in the project root:
 
 ```env
-# Windows paths use double backslashes or forward slashes
+# Replace <username> with your Windows username
 LLAMA_WEBUI_LLAMA_SERVER=C:\Users\<username>\llamacpp-workbench\third_party\llama.cpp\build-cuda\bin\Release\llama-server.exe
 LLAMA_WEBUI_LLAMA_CLI=C:\Users\<username>\llamacpp-workbench\third_party\llama.cpp\build-cuda\bin\Release\llama-cli.exe
 
@@ -172,19 +158,27 @@ LLAMA_WEBUI_MODEL_DIRS=C:\Users\<username>\models;C:\Users\<username>\llamacpp-w
 LLAMA_WEBUI_DATA_DIR=C:\Users\<username>\llamacpp-workbench\data
 ```
 
+Or use the configure script:
+```powershell
+.\scripts\configure_env.ps1 -CreateEnvFile
+```
+
 Or set via PowerShell:
 ```powershell
 $env:LLAMA_WEBUI_LLAMA_SERVER = "C:\Users\$env:USERNAME\llamacpp-workbench\third_party\llama.cpp\build-cuda\bin\Release\llama-server.exe"
 $env:LLAMA_WEBUI_LLAMA_CLI = "C:\Users\$env:USERNAME\llamacpp-workbench\third_party\llama.cpp\build-cuda\bin\Release\llama-cli.exe"
 ```
 
-### Step 7: Download a Model
+### Step 6: Download a Model
 
 Download a GGUF model from HuggingFace:
 
-**Recommended for RTX 5060 (8GB VRAM)**:
+**Recommended for GPUs with 6-8 GB VRAM**:
 - `Qwen2.5-7B-Instruct-Q4_K_M.gguf` (~4.5GB)
 - `Llama-3.1-8B-Instruct-Q4_K_M.gguf` (~4.9GB)
+
+**Recommended for GPUs with 4 GB VRAM**:
+- `Qwen2.5-3B-Instruct-Q4_K_M.gguf` (~2GB)
 
 **Recommended for testing (small, fast)**:
 - `Qwen2.5-1.5B-Instruct-Q4_K_M.gguf` (~1GB)
@@ -198,7 +192,7 @@ curl.exe -L -o models\Qwen2.5-1.5B-Instruct-Q4_K_M.gguf `
     https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
 ```
 
-### Step 8: Run the Application
+### Step 7: Run the Application
 
 ```powershell
 # Activate venv if not already active
@@ -212,23 +206,21 @@ Open browser to: http://localhost:8095
 
 ## GPU Configuration for Dual GPU Laptops
 
-### Switching to NVIDIA GPU
+On laptops with both integrated and discrete GPUs, Windows may use the integrated GPU by default. To force NVIDIA:
 
-On laptops with dual GPUs, Windows may use the Intel iGPU by default. To force NVIDIA:
-
-#### Method 1: NVIDIA Control Panel
+### Method 1: NVIDIA Control Panel
 1. Open NVIDIA Control Panel
 2. Go to "Manage 3D settings"
 3. Select "Program Settings" tab
 4. Add `llama-server.exe` and `python.exe`
 5. Set preferred graphics processor to "High-performance NVIDIA processor"
 
-#### Method 2: Windows Graphics Settings
-1. Open Windows Settings → System → Display → Graphics
+### Method 2: Windows Graphics Settings
+1. Open Windows Settings -> System -> Display -> Graphics
 2. Add `llama-server.exe` as a custom app
 3. Set to "High performance"
 
-#### Method 3: Environment Variable
+### Method 3: Environment Variable
 ```powershell
 $env:CUDA_VISIBLE_DEVICES = "0"
 ```
@@ -248,8 +240,9 @@ You should see `llama-server.exe` in the process list with GPU memory usage.
 **Cause**: CUDA toolkit not installed or not in PATH
 **Fix**: Add CUDA to PATH:
 ```powershell
-$env:PATH += ";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
+$env:PATH += ";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"
 ```
+Adjust the version number to match your installed CUDA version.
 
 ### Issue: "cl not found" during build
 **Cause**: MSVC not installed or not in PATH
@@ -259,18 +252,18 @@ $env:PATH += ";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
 ```
 
 ### Issue: "CUDA architecture not supported"
-**Cause**: RTX 5060 uses Blackwell (sm_100) which requires CUDA 12.8+
-**Fix**: Update CUDA toolkit to 12.8 or later
+**Cause**: CUDA toolkit version too old for your GPU architecture
+**Fix**: Update CUDA toolkit. RTX 50-series (Blackwell) requires CUDA 12.8+. RTX 40/30/20-series generally works with CUDA 12.4+.
 
 ### Issue: "Unknown" status for NVIDIA GPU
-**Cause**: GPU in power-saving mode or driver issue
+**Cause**: GPU in power-saving mode or driver issue (common on dual-GPU laptops)
 **Fix**:
-1. Update NVIDIA drivers
-2. Disable Intel GPU in BIOS (if mux switch available)
-3. Force NVIDIA GPU via control panel
+1. Update NVIDIA drivers from https://www.nvidia.com/drivers
+2. Disable integrated GPU in BIOS (if mux switch available)
+3. Force NVIDIA GPU via NVIDIA Control Panel (see above)
 
 ### Issue: Out of memory errors
-**Fix**: Reduce GPU layers or use quantization:
+**Fix**: Reduce GPU layers or use a smaller model:
 ```json
 {
   "gpu_layers": 20,
@@ -278,27 +271,10 @@ $env:PATH += ";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
 }
 ```
 
-## Current Status Checklist
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Python venv | ✅ | Created at `.venv` |
-| Python deps | ✅ | fastapi, uvicorn installed |
-| llama.cpp source | ✅ | Cloned to `third_party/llama.cpp` |
-| CMake | ❌ | Not installed |
-| MSVC Build Tools | ❌ | Not installed |
-| CUDA Toolkit | ❌ | Not installed |
-| llama-server built | ❌ | Requires above tools |
-| Model downloaded | ❌ | Pending |
-| GPU working | ❌ | Shows "Unknown" status |
-
 ## Quick Reference Commands
 
 ```powershell
 # Check GPU status
-Get-PnpDevice -Class Display | Select-Object Name, Status
-
-# Check NVIDIA GPU info (admin required)
 nvidia-smi
 
 # Check if tools are installed
@@ -314,21 +290,8 @@ llama-webui
 ## Additional Resources
 
 - [llama.cpp GitHub](https://github.com/ggerganov/llama.cpp)
-- [llama.cpp Releases](https://github.com/ggerganov/llama.cpp/releases)
+- [llama.cpp Releases](https://github.com/ggml-org/llama.cpp/releases)
 - [CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
 - [Visual Studio Downloads](https://visualstudio.microsoft.com/downloads/)
 - [CMake Downloads](https://cmake.org/download/)
-
-## Notes for PR
-
-This documentation was created to help Windows users with RTX 5060 laptops set up llama-webui. Key additions needed:
-
-1. Windows-specific setup instructions
-2. Dual GPU laptop configuration
-3. Pre-built binary download links
-4. Environment variable configuration for Windows paths
-5. Troubleshooting section for common Windows issues
-
----
-
-*Last updated: 2026-03-31*
+- [SETUP_MISSING_COMPONENTS.md](./SETUP_MISSING_COMPONENTS.md) - Dependency troubleshooting
