@@ -56,10 +56,11 @@ def data_dir() -> Path:
 
 def model_roots() -> tuple[Path, ...]:
     configured = _split_paths(os.environ.get("LLAMA_WEBUI_MODEL_DIRS"))
-    if configured:
-        return tuple(configured)
-    fallbacks: list[Path] = []
+    # Auto-discover HuggingFace cache and common model directories. Explicit
+    # LLAMA_WEBUI_MODEL_DIRS entries are additive so launch scripts do not hide
+    # models in ~/models or ~/llama-rpc/models.
     hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
+    fallbacks: list[Path] = list(configured)
     if hf_cache.exists():
         for model_dir in hf_cache.glob("models--*"):
             snapshot_dir = model_dir / "snapshots"
@@ -67,7 +68,11 @@ def model_roots() -> tuple[Path, ...]:
                 for snapshot in snapshot_dir.iterdir():
                     if snapshot.is_dir():
                         fallbacks.append(snapshot)
-    fallbacks.extend([PROJECT_ROOT / "models", Path.home() / "models"])
+    fallbacks.extend([
+        PROJECT_ROOT / "models",
+        Path.home() / "models",
+        Path.home() / "llama-rpc" / "models",
+    ])
     return tuple(fallbacks)
 
 
@@ -103,14 +108,16 @@ def _resolve_binary(env_var: str, command_name: str, candidates: list[Path]) -> 
 def resolve_llama_server_binary() -> str:
     base = PROJECT_ROOT / "third_party" / "llama.cpp"
     candidates = [
-        base / "build" / "bin" / "llama-server",
-        base / "build-cuda" / "bin" / "llama-server",
-        base / "build-rk-opt" / "bin" / "llama-server",
+        base / "prebuilt" / "llama-server.exe",  # Windows prebuilt
         base / "prebuilt" / "llama-server",
+        base / "build-cuda" / "bin" / "llama-server",
+        base / "build" / "bin" / "llama-server",
+        base / "build-rk-opt" / "bin" / "llama-server",
     ]
     if GPU_BACKEND == "cuda":
         cuda_first = [
             base / "build-cuda" / "bin" / "llama-server",
+            base / "prebuilt" / "llama-server.exe",
             base / "prebuilt" / "llama-server",
             base / "build" / "bin" / "llama-server",
         ]
@@ -121,14 +128,16 @@ def resolve_llama_server_binary() -> str:
 def resolve_llama_cli_binary() -> str:
     base = PROJECT_ROOT / "third_party" / "llama.cpp"
     candidates = [
-        base / "build" / "bin" / "llama-cli",
-        base / "build-cuda" / "bin" / "llama-cli",
-        base / "build-rk-opt" / "bin" / "llama-cli",
+        base / "prebuilt" / "llama-cli.exe",  # Windows prebuilt
         base / "prebuilt" / "llama-cli",
+        base / "build-cuda" / "bin" / "llama-cli",
+        base / "build" / "bin" / "llama-cli",
+        base / "build-rk-opt" / "bin" / "llama-cli",
     ]
     if GPU_BACKEND == "cuda":
         cuda_first = [
             base / "build-cuda" / "bin" / "llama-cli",
+            base / "prebuilt" / "llama-cli.exe",
             base / "prebuilt" / "llama-cli",
             base / "build" / "bin" / "llama-cli",
         ]
