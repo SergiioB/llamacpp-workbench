@@ -7,11 +7,9 @@ const state = {
   models: [],
   downloads: [],
   modelPresets: [],
-  browserEngine: null,
-  browserModelId: null,
-  browserMode: false,
-  _pendingRender: null,
-  _rafId: null,
+  preflight: null,
+  preflightAutoRefresh: true,
+  serverStarting: false,
 };
 
 const markdown = window.markdownit({
@@ -29,18 +27,14 @@ const PROMPT_PRESETS = [
 ];
 
 const fields = [
-  "llama_binary", "model_path", "cpu_mask", "llama_host", "llama_port", "ctx_size", "threads", "gpu_layers",
-  "parallel", "batch_size", "ubatch_size", "temperature", "top_p", "top_k", "min_p",
+  "llama_binary", "model_path", "cpu_mask", "llama_host", "llama_port", "runtime_mode", "rpc_host", "rpc_port",
+  "rpc_tensor_split", "ctx_size", "threads", "gpu_layers", "parallel", "batch_size", "ubatch_size", "temperature", "top_p", "top_k", "min_p",
   "repeat_penalty", "presence_penalty", "max_tokens", "custom_args", "system_prompt"
 ];
 
-/* ── helpers ── */
-
-function escapeHtml(str) {
-  const el = document.createElement("span");
-  el.textContent = str;
-  return el.innerHTML;
-}
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   API helpers
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -70,14 +64,36 @@ async function parseErrorResponse(response) {
   }
 }
 
-/* ── config form ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Settings Drawer
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+function openDrawer() {
+  document.getElementById("settings-drawer").classList.add("open");
+}
+
+function closeDrawer() {
+  document.getElementById("settings-drawer").classList.remove("open");
+}
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Sidebar Toggle (mobile)
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+function toggleSidebar() {
+  document.getElementById("sidebar").classList.toggle("open");
+}
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Config Form
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function readConfigForm() {
   const config = {};
   for (const field of fields) {
     const element = document.getElementById(field);
     const value = element.value;
-    config[field] = ["llama_port", "ctx_size", "threads", "gpu_layers", "parallel", "batch_size", "ubatch_size", "top_k", "max_tokens"].includes(field)
+    config[field] = ["llama_port", "rpc_port", "ctx_size", "threads", "gpu_layers", "parallel", "batch_size", "ubatch_size", "top_k", "max_tokens"].includes(field)
       ? Number(value)
       : ["temperature", "top_p", "min_p", "repeat_penalty", "presence_penalty"].includes(field)
         ? Number(value)
@@ -108,13 +124,45 @@ function writeConfigForm(config, candidateModels = [], modelPresets = []) {
   for (const preset of modelPresets) {
     const option = document.createElement("option");
     option.value = preset.id;
-    option.textContent = `${preset.label} - ${preset.description}`;
-    option.dataset.presetId = preset.id;
+    option.textContent = `${preset.label} â€” ${preset.description}`;
     presetSelect.appendChild(option);
   }
 
   renderLoadedModelSummary();
+  updateRpcGuide();
 }
+
+function rpcConfigFromForm() {
+  const mode = document.getElementById("runtime_mode")?.value || "local";
+  const host = document.getElementById("rpc_host")?.value?.trim() || "";
+  const port = document.getElementById("rpc_port")?.value || "50052";
+  const split = document.getElementById("rpc_tensor_split")?.value?.trim() || "";
+  return { mode, host, port, split };
+}
+
+function updateRpcGuide() {
+  const guide = document.getElementById("rpc-guide");
+  const command = document.getElementById("rpc-guide-command");
+  const localNote = document.getElementById("local-mode-note");
+  const rpcNote = document.getElementById("rpc-mode-note");
+  const health = document.getElementById("rpc-health");
+  if (!guide || !command) return;
+
+  const { mode, host, port, split } = rpcConfigFromForm();
+  const rpcEnabled = mode === "rpc";
+  guide.hidden = !rpcEnabled;
+  command.textContent = `rpc-server.exe -H 0.0.0.0 -p ${port || "50052"} -c`;
+  localNote?.classList.toggle("active", !rpcEnabled);
+  rpcNote?.classList.toggle("active", rpcEnabled);
+  if (health) {
+    health.textContent = rpcEnabled ? "Not checked" : "Local mode";
+    health.className = `health-badge ${rpcEnabled ? "neutral" : "ok"}`;
+  }
+}
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Utility
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function formatGiB(sizeBytes) {
   return `${(sizeBytes / (1024 ** 3)).toFixed(2)} GiB`;
@@ -122,7 +170,7 @@ function formatGiB(sizeBytes) {
 
 function basename(path) {
   if (!path) return "";
-  const parts = path.split("/");
+  const parts = path.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || path;
 }
 
@@ -131,80 +179,53 @@ function renderLoadedModelSummary() {
   const metaEl = document.getElementById("loaded-model-meta");
   if (!nameEl || !metaEl || !state.config) return;
 
-  if (state.browserMode) {
-    nameEl.textContent = state.browserModelId || "Browser Model";
-    metaEl.textContent = "WebGPU · in-browser";
-    return;
-  }
-
   const modelPath = String(state.config.model_path || "");
-  nameEl.textContent = basename(modelPath) || "Unknown";
+  nameEl.textContent = basename(modelPath) || "No model loaded";
 
   const ctx = state.config.ctx_size ? `ctx ${state.config.ctx_size}` : "";
   const temp = Number.isFinite(Number(state.config.temperature)) ? `temp ${Number(state.config.temperature).toFixed(2)}` : "";
   const maxTokens = state.config.max_tokens ? `max ${state.config.max_tokens}` : "";
-  const parts = [ctx, temp, maxTokens].filter(Boolean);
+  const rpcEndpoint = state.config.rpc_host ? `${state.config.rpc_host}:${state.config.rpc_port}` : "";
+  const split = state.config.rpc_tensor_split ? ` split ${state.config.rpc_tensor_split}` : "";
+  const mode = state.config.runtime_mode === "rpc" ? `rpc ${rpcEndpoint}${split}` : "";
+  const parts = [mode, ctx, temp, maxTokens].filter(Boolean);
   metaEl.textContent = parts.join(" · ");
 }
 
-/* ── model library ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Rendering
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function renderModelLibrary() {
   const container = document.getElementById("model-library");
   container.innerHTML = "";
   const selectedPath = document.getElementById("model_path").value || "";
 
-  const frag = document.createDocumentFragment();
   for (const model of state.models) {
     const card = document.createElement("div");
     card.className = `model-card ${selectedPath === model.path ? "active" : ""}`;
-
-    const title = document.createElement("div");
-    title.className = "card-title";
-    title.textContent = model.name;
-
-    const meta = document.createElement("div");
-    meta.className = "card-meta";
-    const tags = [formatGiB(model.size_bytes)];
-    if (model.is_reap) tags.push("REAP");
-    if (model.is_a3b) tags.push("A3B");
-    if (model.is_moe) tags.push("MoE");
-    meta.textContent = tags.join(" · ");
-
-    const vramEl = document.createElement("div");
-    vramEl.className = "card-meta";
-    if (model.vram) {
-      const v = model.vram;
-      const fits = [];
-      if (v.fits_4gb) fits.push("4GB");
-      if (v.fits_8gb) fits.push("8GB");
-      if (v.fits_12gb) fits.push("12GB");
-      if (v.fits_16gb) fits.push("16GB");
-      if (v.fits_24gb) fits.push("24GB");
-      vramEl.textContent = `~${v.min_vram_gib} GiB VRAM · fits: ${fits.length ? fits.join(", ") : "needs >24GB"}`;
-    } else {
-      vramEl.textContent = "";
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Use This";
-    btn.onclick = () => {
+    const validationClass = model.validation_status || "unvalidated";
+    const validationLabel = model.validation_label || "Unvalidated";
+    const validationNote = model.validation_note || "";
+    card.innerHTML = `
+      <div class="model-card-top">
+        <div class="card-title">${model.name}</div>
+        <span class="validation-badge ${validationClass}">${validationLabel}</span>
+      </div>
+      <div class="card-meta">${formatGiB(model.size_bytes)}${model.is_reap ? " · REAP" : ""}${model.is_a3b ? " · A3B" : ""}</div>
+      <div class="card-meta">${validationNote}</div>
+      <div class="card-meta">${model.path}</div>
+      <div class="card-actions">
+        <button type="button" class="btn btn-secondary btn-sm">Use This</button>
+      </div>
+    `;
+    card.querySelector("button").onclick = () => {
       document.getElementById("model_path").value = model.path;
       renderModelLibrary();
       setStatus(`Selected ${model.name}`);
     };
-    actions.appendChild(btn);
-
-    card.appendChild(title);
-    card.appendChild(meta);
-    card.appendChild(vramEl);
-    card.appendChild(actions);
-    frag.appendChild(card);
+    container.appendChild(card);
   }
-  container.appendChild(frag);
 }
 
 function renderDownloads() {
@@ -215,32 +236,21 @@ function renderDownloads() {
     return;
   }
 
-  const frag = document.createDocumentFragment();
   for (const job of state.downloads) {
     const card = document.createElement("div");
     card.className = "download-card";
     const logTail = (job.log_tail || []).slice(-6).join("\n");
-
-    const title = document.createElement("div");
-    title.className = "card-title";
-    title.textContent = job.status.toUpperCase();
-
-    const meta = document.createElement("div");
-    meta.className = "card-meta";
-    meta.textContent = job.destination_path;
-
-    const size = document.createElement("div");
-    size.className = "card-meta";
-    size.textContent = `${job.downloaded_bytes ? formatGiB(job.downloaded_bytes) : "0.00 GiB"} downloaded`;
-
-    const log = document.createElement("div");
-    log.className = "log-tail";
-    log.textContent = logTail || "Waiting for log output...";
-
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
+    card.innerHTML = `
+      <div class="card-title">${job.status.toUpperCase()}</div>
+      <div class="card-meta">${job.destination_path}</div>
+      <div class="card-meta">${job.downloaded_bytes ? formatGiB(job.downloaded_bytes) : "0.00 GiB"} downloaded</div>
+      <div class="log-tail">${logTail || "Waiting for log output..."}</div>
+      <div class="card-actions"></div>
+    `;
+    const actions = card.querySelector(".card-actions");
     if (job.status === "running") {
       const cancel = document.createElement("button");
+      cancel.className = "btn btn-secondary btn-sm";
       cancel.textContent = "Cancel";
       cancel.onclick = async () => {
         await api(`/api/models/download/${job.job_id}/cancel`, { method: "POST" });
@@ -248,135 +258,115 @@ function renderDownloads() {
       };
       actions.appendChild(cancel);
     }
-
-    card.appendChild(title);
-    card.appendChild(meta);
-    card.appendChild(size);
-    card.appendChild(log);
-    card.appendChild(actions);
-    frag.appendChild(card);
+    container.appendChild(card);
   }
-  container.appendChild(frag);
 }
-
-/* ── chat list ── */
 
 function renderChats() {
   const chatList = document.getElementById("chat-list");
   chatList.innerHTML = "";
-  const frag = document.createDocumentFragment();
   for (const chat of state.chats) {
     const item = document.createElement("div");
     item.className = `chat-item ${chat.chat_id === state.currentChatId ? "active" : ""}`;
     item.textContent = chat.title;
     item.onclick = () => loadChat(chat.chat_id);
-    frag.appendChild(item);
+    chatList.appendChild(item);
   }
-  chatList.appendChild(frag);
 }
-
-/* ── messages: performance-critical rendering ── */
 
 function renderMessages(chat) {
   document.getElementById("chat-title").textContent = chat.title;
   const container = document.getElementById("messages");
   container.innerHTML = "";
-  const frag = document.createDocumentFragment();
   for (const message of chat.messages) {
-    const el = document.createElement("div");
-    el.className = `message ${message.role}`;
-    renderMessageContent(el, message.content);
-    frag.appendChild(el);
+    const el = createMessageElement(message.role, message.content);
+    container.appendChild(el);
   }
-  container.appendChild(frag);
-  requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+  container.scrollTop = container.scrollHeight;
+}
+
+function createMessageElement(role, content = "", options = {}) {
+  const el = document.createElement("div");
+  el.className = `message ${role}`;
+
+  const label = document.createElement("div");
+  label.className = "role-label";
+  label.textContent = role === "user" ? "You" : "llama.cpp";
+  el.appendChild(label);
+
+  const contentEl = document.createElement("div");
+  el.appendChild(contentEl);
+
+  renderMessageContent(contentEl, content, options.pending);
+
+  return el;
 }
 
 function appendLiveMessage(role, content = "", options = {}) {
   const container = document.getElementById("messages");
-  const el = document.createElement("div");
-  el.className = `message ${role}`;
+  const el = createMessageElement(role, content, options);
   if (options.pending) {
     el.dataset.pending = "true";
   }
-  renderMessageContent(el, content);
   container.appendChild(el);
-  requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+  container.scrollTop = container.scrollHeight;
   return el;
 }
 
-function renderMessageContent(element, content) {
+function renderMessageContent(element, content, pending = false) {
   const safeContent = content || "";
   if (!safeContent.trim()) {
-    if (element.dataset.pending === "true") {
+    if (pending) {
       element.innerHTML = `<p class="message-placeholder">Generating<span class="dot-1">.</span><span class="dot-2">.</span><span class="dot-3">.</span></p>`;
     } else {
       element.textContent = safeContent;
     }
     return;
   }
-  delete element.dataset.pending;
   element.innerHTML = markdown.render(safeContent);
 }
 
-/* Streaming: fast-path that only appends new text instead of re-rendering everything */
-let _streamBuffer = "";
-let _streamElement = null;
-let _streamRenderScheduled = false;
-
-function streamAppendDelta(delta) {
-  _streamBuffer += delta;
-  if (!_streamRenderScheduled) {
-    _streamRenderScheduled = true;
-    requestAnimationFrame(renderStreamBuffer);
-  }
-}
-
-function renderStreamBuffer() {
-  _streamRenderScheduled = false;
-  if (!_streamElement) return;
-  delete _streamElement.dataset.pending;
-  _streamElement.innerHTML = markdown.render(_streamBuffer);
-  const container = document.getElementById("messages");
-  container.scrollTop = container.scrollHeight;
-}
-
-function streamReset() {
-  _streamBuffer = "";
-  _streamElement = null;
-  _streamRenderScheduled = false;
-}
-
-/* ── status helpers ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Status helpers
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function formatLatencyMs(ms) {
-  return `${(Number(ms) / 1000).toFixed(2)} s`;
+  return `${(Number(ms) / 1000).toFixed(2)}s`;
 }
 
 function setStatus(text, ok = true) {
   const status = document.getElementById("status-text");
   status.textContent = text;
-  status.style.color = ok ? "#5ee17f" : "#ff948c";
+  status.style.color = ok ? "var(--green)" : "var(--red)";
 }
 
 function setChatStatus(text, ok = true) {
   const status = document.getElementById("chat-status-text");
   status.textContent = text;
-  status.style.color = ok ? "#5ee17f" : "#ff948c";
+  status.style.color = ok ? "var(--text-tertiary)" : "var(--red)";
 }
 
 function setGenerating(active) {
   state.generating = active;
   const button = document.getElementById("send-message");
-  button.textContent = active ? "Stop" : "Send";
   button.classList.toggle("stop", active);
+  // Swap icon
+  const icon = button.querySelector("i, svg");
+  if (icon) {
+    button.innerHTML = active
+      ? '<i data-lucide="square" class="icon-md"></i>'
+      : '<i data-lucide="arrow-up" class="icon-md"></i>';
+    lucide.createIcons();
+  }
 }
 
-/* ── prompt presets ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Prompt Presets
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function loadPromptPresets() {
   const select = document.getElementById("prompt-presets");
-  select.innerHTML = `<option value="">Choose a test prompt...</option>`;
+  select.innerHTML = `<option value="">Presets...</option>`;
   for (const preset of PROMPT_PRESETS) {
     const option = document.createElement("option");
     option.value = preset.text;
@@ -385,7 +375,9 @@ function loadPromptPresets() {
   }
 }
 
-/* ── API refresh calls ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Data refresh
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 async function refreshConfig() {
   const data = await api("/api/config");
@@ -393,7 +385,6 @@ async function refreshConfig() {
 }
 
 async function refreshModels() {
-  if (document.hidden) return;
   const data = await api("/api/models");
   state.models = data.models;
   state.downloads = data.downloads;
@@ -410,19 +401,179 @@ async function refreshChats() {
 async function refreshServerStatus() {
   const data = await api("/api/server/status");
   const indicator = document.getElementById("server-indicator");
-  indicator.textContent = data.status.healthy ? "online" : "offline";
-  indicator.className = `badge ${data.status.healthy ? "online" : "offline"}`;
+  const isOnline = data.status.healthy;
+  indicator.className = `server-status ${isOnline ? "online" : "offline"}`;
+  indicator.querySelector(".status-text").textContent = isOnline ? "Online" : "Offline";
   if (data.config) {
     state.config = data.config;
     renderLoadedModelSummary();
   }
+  const serverManaged = Boolean(data.status?.managed || data.status?.pid || state.serverStarting);
+  // Auto-refresh preflight only when no managed llama-server is loading.
+  if (!isOnline && state.preflightAutoRefresh && !serverManaged) {
+    runPreflight();
+  }
 }
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Actions
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 async function loadChat(chatId) {
   const data = await api(`/api/chats/${chatId}`);
   state.currentChatId = chatId;
   renderChats();
   renderMessages(data.chat);
+}
+
+async function runPreflight() {
+  if (state.serverStarting) {
+    const statusEl = document.getElementById("preflight-status");
+    if (statusEl) {
+      statusEl.textContent = "Paused while model loads";
+      statusEl.className = "preflight-status neutral";
+    }
+    return;
+  }
+  const config = readConfigForm();
+  const statusEl = document.getElementById("preflight-status");
+  const checksEl = document.getElementById("preflight-checks");
+  const warningsEl = document.getElementById("preflight-warnings");
+  const startBtn = document.getElementById("start-server");
+
+  statusEl.textContent = "Checking...";
+  statusEl.className = "preflight-status neutral";
+
+  try {
+    const result = await api("/api/preflight", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+    });
+    state.preflight = result;
+    renderPreflight(result, statusEl, checksEl, warningsEl);
+
+    // Disable Start only when preflight ran and found blocking issues
+    if (startBtn) {
+      startBtn.disabled = !result.ready;
+      startBtn.title = result.ready ? "Start llama.cpp" : "Fix blocking issues first";
+    }
+  } catch (error) {
+    // 404 means server hasn't been updated yet — don't block Start
+    const msg = String(error.message || "");
+    const notFound = msg.includes("Not Found") || msg.includes("404");
+    statusEl.textContent = notFound ? "Preflight unavailable (restart WebUI to enable)" : `Check failed: ${msg}`;
+    statusEl.className = "preflight-status neutral";
+    checksEl.innerHTML = "";
+    warningsEl.innerHTML = "";
+    // Never disable Start on preflight failure — the old start path still works
+  }
+}
+
+function renderPreflight(result, statusEl, checksEl, warningsEl) {
+  if (result.ready) {
+    statusEl.textContent = "Ready to launch";
+    statusEl.className = "preflight-status ok";
+  } else {
+    statusEl.textContent = `${result.blocking_issues.length} blocking issue(s)`;
+    statusEl.className = "preflight-status bad";
+  }
+
+  const checks = result.checks || {};
+  let html = "";
+
+  if (checks.server) {
+    const server = checks.server;
+    const label = server.healthy
+      ? `Online${server.pid ? ` (PID ${server.pid})` : ""}`
+      : server.pid ? `Loading (PID ${server.pid})` : "Offline";
+    html += renderCheckItem("llama-server", server.healthy ? true : null, label);
+    checksEl.innerHTML = html;
+    warningsEl.innerHTML = (result.warnings || [])
+      .map(w => `<div class="preflight-warning">\u26A0\uFE0F ${escapeHtml(w)}</div>`)
+      .join("");
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  // Binary check
+  html += renderCheckItem("llama-server binary", checks.binary_exists, checks.binary_exists ? "Found" : "Not found");
+
+  // Model check
+  html += renderCheckItem("Model file", checks.model_exists, checks.model_exists ? "Found" : "Not found");
+
+  // VRAM check
+  if (checks.vram) {
+    const vram = checks.vram;
+    if (vram.local_vram && vram.local_vram.available) {
+      const freeGib = vram.local_vram.free_gib;
+      const neededGib = vram.estimated_local_gib;
+      const label = vram.fits === true ? `OK (${freeGib} GiB free, ~${neededGib} GiB needed)`
+        : vram.fits === false ? `Too low (${freeGib} GiB free, ~${vram.needed_gib} GiB needed)`
+        : `Unknown (free: ${freeGib} GiB)`;
+      html += renderCheckItem("Local VRAM", vram.fits, label);
+    } else {
+      html += renderCheckItem("Local VRAM", null, "Skipped (no NVIDIA GPU)");
+    }
+  }
+
+  // RPC check
+  if (checks.rpc) {
+    const rpc = checks.rpc;
+    const rpcStatus = rpc.reachable && rpc.tensor_split_ok !== false;
+    const rpcLabel = !rpc.reachable ? `Unreachable: ${rpc.error}`
+      : rpc.tensor_split_ok === false ? "Missing tensor split"
+      : "Reachable";
+    html += renderCheckItem("RPC endpoint", rpcStatus, rpcLabel);
+  }
+
+  checksEl.innerHTML = html;
+
+  // Warnings and log diagnoses
+  const allWarnings = [...(result.warnings || [])];
+  if (result.log_diagnoses) {
+    for (const d of result.log_diagnoses) {
+      allWarnings.push(`${d.title}: ${d.suggestion}`);
+    }
+  }
+  if (allWarnings.length > 0) {
+    warningsEl.innerHTML = allWarnings.map(w => `<div class="preflight-warning">\u26A0\uFE0F ${escapeHtml(w)}</div>`).join("");
+  } else {
+    warningsEl.innerHTML = "";
+  }
+
+  // Re-create Lucide icons for the new elements
+  if (window.lucide) lucide.createIcons();
+}
+
+function renderCheckItem(name, status, label) {
+  const icon = status === true ? "check-circle" : status === false ? "x-circle" : "help-circle";
+  const cls = status === true ? "check-ok" : status === false ? "check-bad" : "check-unknown";
+  return `<div class="check-item ${cls}"><i data-lucide="${icon}" class="icon-xs"></i><span class="check-name">${escapeHtml(name)}</span><span class="check-label">${escapeHtml(label)}</span></div>`;
+}
+
+function escapeHtml(text) {
+  const el = document.createElement("span");
+  el.textContent = String(text || "");
+  return el.innerHTML;
+}
+
+async function refreshDiagnostics() {
+  try {
+    const data = await api("/api/server/logs?lines=80");
+    document.getElementById("diag-start-error").textContent = data.start_error || "No error recorded.";
+    document.getElementById("diag-log-tail").textContent = data.log_tail || "No log output.";
+    const diagEl = document.getElementById("diag-diagnoses");
+    if (data.diagnoses && data.diagnoses.length > 0) {
+      diagEl.innerHTML = data.diagnoses.map(d =>
+        `<div class="diag-item diag-${d.severity}"><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.detail)}</p><p class="diag-suggestion">${escapeHtml(d.suggestion)}</p></div>`
+      ).join("");
+    } else {
+      diagEl.textContent = "No issues found.";
+    }
+    if (window.lucide) lucide.createIcons();
+  } catch {
+    // silent
+  }
 }
 
 async function createChat() {
@@ -434,31 +585,124 @@ async function createChat() {
   await loadChat(data.chat.chat_id);
 }
 
-/* ── server mode actions ── */
-
 async function saveConfig() {
   const config = readConfigForm();
-  await api("/api/config", {
+  try {
+    await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+    });
+    setStatus("Config saved");
+    await refreshConfig();
+  } catch (error) {
+    setStatus(error.message, false);
+  }
+}
+
+async function checkRpcEndpoint() {
+  const config = readConfigForm();
+  const health = document.getElementById("rpc-health");
+  if (config.runtime_mode !== "rpc") {
+    if (health) {
+      health.textContent = "Local mode";
+      health.className = "health-badge ok";
+    }
+    setStatus("RPC check skipped in single-host mode");
+    return;
+  }
+  if (!String(config.rpc_host || "").trim()) {
+    if (health) {
+      health.textContent = "Missing host";
+      health.className = "health-badge bad";
+    }
+    setStatus("Enter an RPC host before checking", false);
+    return;
+  }
+  setStatus("Checking RPC endpoint...", true);
+  if (health) {
+    health.textContent = "Checking...";
+    health.className = "health-badge neutral";
+  }
+  const data = await api("/api/rpc/preflight", {
     method: "POST",
     body: JSON.stringify({ config }),
   });
-  setStatus("Config saved");
-  await refreshConfig();
+  if (data.reachable) {
+    if (health) {
+      health.textContent = "Reachable";
+      health.className = "health-badge ok";
+    }
+    setStatus(`RPC ready: ${data.endpoint || "endpoint"}`);
+    return;
+  }
+  if (health) {
+    health.textContent = "Unreachable";
+    health.className = "health-badge bad";
+  }
+  setStatus(`RPC unreachable: ${data.error || data.endpoint || "unknown error"}`, false);
 }
 
 async function startServer() {
   const config = readConfigForm();
+  state.serverStarting = true;
   setStatus("Starting llama.cpp...", true);
-  await api("/api/server/start", {
-    method: "POST",
-    body: JSON.stringify({ config }),
-  });
-  await refreshServerStatus();
-  setStatus("llama.cpp online");
-  await refreshConfig();
+  try {
+    const result = await api("/api/server/start", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+    });
+    if (result.status === "starting") {
+      pollUntilReady();
+    } else {
+      await refreshServerStatus();
+      setStatus("llama.cpp online");
+    }
+    await refreshConfig();
+  } catch (error) {
+    state.serverStarting = false;
+    setStatus(error.message, false);
+  }
+}
+
+async function pollUntilReady() {
+  const maxAttempts = 120;
+  for (let i = 0; i < maxAttempts; i++) {
+    setStatus(`Loading model... (${i + 1}s)`, true);
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const data = await api("/api/server/status");
+      if (data.status.healthy) {
+        state.serverStarting = false;
+        state.config = data.config;
+        renderLoadedModelSummary();
+        const indicator = document.getElementById("server-indicator");
+        indicator.className = "server-status online";
+        indicator.querySelector(".status-text").textContent = "Online";
+        setStatus("llama.cpp online");
+        await refreshConfig();
+        return;
+      }
+      // Check if the process died â€” health() returns managed pid info
+      const pid = data.status.pid;
+      if (pid === null && i > 3) {
+        state.serverStarting = false;
+        const rawError = data.status.start_error || data.status.error || "llama-server exited unexpectedly";
+        const firstLine = String(rawError).split("\n").find(Boolean) || rawError;
+        setStatus(firstLine.replace(/^Error:\s*/, ""), false);
+        refreshDiagnostics();
+        runPreflight();
+        return;
+      }
+    } catch {
+      // keep polling
+    }
+  }
+  state.serverStarting = false;
+  setStatus("Timed out waiting for llama.cpp", false);
 }
 
 async function stopServer() {
+  state.serverStarting = false;
   await api("/api/server/stop", { method: "POST" });
   await refreshServerStatus();
   setStatus("llama.cpp stopped");
@@ -467,15 +711,21 @@ async function stopServer() {
 async function loadSelectedModel() {
   const modelPath = document.getElementById("model_path").value.trim();
   if (!modelPath) return;
+  state.serverStarting = true;
   setStatus("Loading selected model...", true);
-  await api("/api/models/load", {
-    method: "POST",
-    body: JSON.stringify({ model_path: modelPath }),
-  });
-  await refreshServerStatus();
-  await refreshConfig();
-  await refreshModels();
-  setStatus("Selected model loaded");
+  try {
+    const result = await api("/api/models/load", {
+      method: "POST",
+      body: JSON.stringify({ model_path: modelPath }),
+    });
+    if (result.status === "starting") {
+      pollUntilReady();
+    }
+    await refreshModels();
+  } catch (error) {
+    state.serverStarting = false;
+    setStatus(error.message, false);
+  }
 }
 
 function selectedPreset() {
@@ -497,40 +747,49 @@ async function loadModelPreset() {
   writeConfigForm(preset.config, state.models.map((model) => model.path), state.modelPresets);
   renderModelLibrary();
   setStatus(`Loading preset: ${preset.label}`, true);
-  await api("/api/server/start", {
-    method: "POST",
-    body: JSON.stringify({ config: preset.config }),
-  });
-  await refreshServerStatus();
-  await refreshConfig();
-  await refreshModels();
-  setStatus(`Preset loaded: ${preset.label}`);
+  try {
+    const result = await api("/api/server/start", {
+      method: "POST",
+      body: JSON.stringify({ config: preset.config }),
+    });
+    if (result.status === "starting") {
+      pollUntilReady();
+    }
+    await refreshModels();
+  } catch (error) {
+    setStatus(error.message, false);
+  }
 }
 
 async function startDownload() {
   const url = document.getElementById("download_url").value.trim();
   const destinationPath = document.getElementById("download_destination").value.trim();
   if (!url) return;
-  await api("/api/models/download", {
-    method: "POST",
-    body: JSON.stringify({ url, destination_path: destinationPath || null }),
-  });
-  document.getElementById("download_url").value = "";
-  await refreshModels();
-  setStatus("Download started");
+  try {
+    await api("/api/models/download", {
+      method: "POST",
+      body: JSON.stringify({ url, destination_path: destinationPath || null }),
+    });
+    document.getElementById("download_url").value = "";
+    await refreshModels();
+    setStatus("Download started");
+  } catch (error) {
+    setStatus(error.message, false);
+  }
 }
 
 async function stopGeneration() {
   if (!state.generating) return;
   state.stopRequested = true;
-  setChatStatus("Stopping...", true);
-  if (state.browserMode) return;
+  setChatStatus("Stopping...");
   await api("/api/generation/stop", { method: "POST" });
 }
 
-/* ── streaming: server mode ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Chat Streaming
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-async function streamChatServer(chatId, content, assistantEl) {
+async function streamChat(chatId, content, assistantEl) {
   const response = await fetch(`/api/chats/${chatId}/messages/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -543,6 +802,7 @@ async function streamChatServer(chatId, content, assistantEl) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const contentEl = assistantEl.querySelector("div:last-child") || assistantEl;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -556,14 +816,25 @@ async function streamChatServer(chatId, content, assistantEl) {
       if (rawLine) {
         const event = JSON.parse(rawLine);
         if (event.type === "delta") {
-          streamAppendDelta(event.delta);
-          setChatStatus(`Generating... ${_streamBuffer.length} chars`, true);
+          renderMessageContent(contentEl, event.content);
+          const container = document.getElementById("messages");
+          container.scrollTop = container.scrollHeight;
+          setChatStatus(`${event.content.length} chars`);
         } else if (event.type === "done") {
-          renderStreamBuffer();
-          streamReset();
           await refreshChats();
           renderMessages(event.chat);
-          setChatStatus(event.cancelled ? `Stopped after ${formatLatencyMs(event.latency_ms)}` : `Done in ${formatLatencyMs(event.latency_ms)}`);
+          // Handle empty response (thinking-only output sanitized to nothing)
+          const msgs = event.chat?.messages || [];
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg && lastMsg.role === "user") {
+            const container = document.getElementById("messages");
+            const note = document.createElement("div");
+            note.className = "message assistant";
+            note.innerHTML = '<div class="role-label">llama.cpp</div><div><p class="message-placeholder">Model returned thinking-only output â€” no visible response.</p></div>';
+            container.appendChild(note);
+            container.scrollTop = container.scrollHeight;
+          }
+          setChatStatus(event.cancelled ? `Stopped · ${formatLatencyMs(event.latency_ms)}` : `Done · ${formatLatencyMs(event.latency_ms)}`);
           return;
         } else if (event.type === "error") {
           throw new Error(event.detail);
@@ -574,44 +845,6 @@ async function streamChatServer(chatId, content, assistantEl) {
   }
 }
 
-/* ── streaming: browser mode via WebLLM ── */
-
-async function streamChatBrowser(content, assistantEl) {
-  if (!state.browserEngine) throw new Error("No browser model loaded");
-  const config = state.config || {};
-  const messages = [];
-  const sys = String(config.system_prompt || "").trim();
-  if (sys) messages.push({ role: "system", content: sys });
-  messages.push({ role: "user", content });
-
-  const chunks = await state.browserEngine.chat.completions.create({
-    messages,
-    temperature: Number(config.temperature) || 1.0,
-    top_p: Number(config.top_p) || 0.95,
-    stream: true,
-  });
-
-  for await (const chunk of chunks) {
-    const delta = chunk.choices[0]?.delta?.content || "";
-    if (delta) {
-      streamAppendDelta(delta);
-      setChatStatus(`Generating... ${_streamBuffer.length} chars`, true);
-    }
-    if (state.stopRequested) {
-      state.browserEngine?.interruptGenerate();
-      break;
-    }
-  }
-
-  renderStreamBuffer();
-  const finalContent = _streamBuffer;
-  streamReset();
-  setChatStatus("Done (browser)");
-  return finalContent;
-}
-
-/* ── send message ── */
-
 async function sendMessage() {
   const input = document.getElementById("message-input");
   if (state.generating) {
@@ -621,35 +854,31 @@ async function sendMessage() {
 
   const content = input.value.trim();
   if (!content) return;
-
-  if (!state.browserMode && !state.currentChatId) {
+  const indicator = document.getElementById("server-indicator");
+  if (!indicator.classList.contains("online")) {
+    setChatStatus("Server is offline â€” start llama.cpp first", false);
+    return;
+  }
+  if (!state.currentChatId) {
     await createChat();
   }
 
   appendLiveMessage("user", content);
   const assistantEl = appendLiveMessage("assistant", "", { pending: true });
-  streamReset();
-  _streamElement = assistantEl;
-
   input.value = "";
+  autoResizeTextarea(input);
   state.stopRequested = false;
   setGenerating(true);
-  setChatStatus("Generating...", true);
-
+  setChatStatus("Generating...");
   try {
-    if (state.browserMode) {
-      await streamChatBrowser(content, assistantEl);
-    } else {
-      await streamChatServer(state.currentChatId, content, assistantEl);
-    }
+    await streamChat(state.currentChatId, content, assistantEl);
   } catch (error) {
     const cancelledByUser = state.stopRequested;
-    renderStreamBuffer();
-    streamReset();
-    setChatStatus(cancelledByUser ? "Stopped" : error.message, !cancelledByUser);
-    if (!state.browserMode && state.currentChatId) {
-      await loadChat(state.currentChatId);
+    if (!cancelledByUser) {
+      const contentEl = assistantEl.querySelector("div:last-child") || assistantEl;
+      contentEl.innerHTML = `<p style="color: var(--red);">${error.message}</p>`;
     }
+    setChatStatus(cancelledByUser ? "Stopped" : error.message);
   } finally {
     state.stopRequested = false;
     setGenerating(false);
@@ -661,6 +890,7 @@ function applyPresetToComposer() {
   const input = document.getElementById("message-input");
   if (!select.value) return;
   input.value = select.value;
+  autoResizeTextarea(input);
   input.focus();
 }
 
@@ -669,92 +899,19 @@ async function runPreset() {
   await sendMessage();
 }
 
-/* ── browser inference: WebLLM ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Auto-resize textarea
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-const BROWSER_MODELS = [
-  { id: "SmolLM2-135M-Instruct-q4f16_1-MLC", label: "SmolLM2 135M (test)", size: "~100MB" },
-  { id: "SmolLM2-360M-Instruct-q4f16_1-MLC", label: "SmolLM2 360M", size: "~220MB" },
-  { id: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B", size: "~700MB" },
-  { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B", size: "~1.8GB" },
-  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 1.5B", size: "~1GB" },
-  { id: "Qwen2.5-3B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 3B", size: "~1.8GB" },
-  { id: "Qwen2.5-7B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 7B", size: "~4GB" },
-  { id: "Phi-3.5-mini-instruct-q4f16_1-MLC", label: "Phi 3.5 Mini 3.8B", size: "~2.3GB" },
-  { id: "Llama-3.1-8B-Instruct-q4f16_1-MLC", label: "Llama 3.1 8B", size: "~4.5GB" },
-  { id: "gemma-2-2b-it-q4f16_1-MLC", label: "Gemma 2 2B", size: "~1.4GB" },
-];
-
-function populateBrowserModels() {
-  const select = document.getElementById("browser-model-select");
-  select.innerHTML = '<option value="">Choose a model...</option>';
-  for (const m of BROWSER_MODELS) {
-    const opt = document.createElement("option");
-    opt.value = m.id;
-    opt.textContent = `${m.label} (${m.size})`;
-    select.appendChild(opt);
-  }
+function autoResizeTextarea(textarea) {
+  textarea.style.height = "auto";
+  const maxHeight = 200;
+  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + "px";
 }
 
-function detectWebGPU() {
-  return !!navigator.gpu;
-}
-
-async function initBrowserMode() {
-  if (!detectWebGPU()) {
-    setBrowserStatus("WebGPU not available in this browser", false);
-    return;
-  }
-
-  setBrowserStatus("Loading WebLLM engine...", true);
-
-  try {
-    const webllm = await import("https://esm.run/@mlc-ai/web-llm");
-
-    state.browserEngine = new webllm.MLCEngine({
-      initProgressCallback: (progress) => {
-        const msg = progress.text || `Loading: ${Math.round((progress.progress || 0) * 100)}%`;
-        setBrowserStatus(msg, true);
-      },
-    });
-
-    state.browserMode = true;
-    populateBrowserModels();
-    setBrowserStatus("WebLLM ready. Select a model to load.", true);
-    document.getElementById("browser-section").classList.add("active");
-    renderLoadedModelSummary();
-  } catch (err) {
-    setBrowserStatus(`WebLLM load failed: ${err.message}`, false);
-  }
-}
-
-async function loadBrowserModel() {
-  const modelId = document.getElementById("browser-model-select").value;
-  if (!modelId || !state.browserEngine) return;
-
-  setBrowserStatus(`Downloading ${modelId}...`, true);
-  setGenerating(true);
-
-  try {
-    await state.browserEngine.reload(modelId);
-    state.browserModelId = modelId;
-    setBrowserStatus(`Loaded: ${modelId}`, true);
-    renderLoadedModelSummary();
-    setStatus(`Browser model: ${modelId}`);
-  } catch (err) {
-    setBrowserStatus(`Failed: ${err.message}`, false);
-  } finally {
-    setGenerating(false);
-  }
-}
-
-function setBrowserStatus(text, ok) {
-  const el = document.getElementById("browser-status");
-  if (!el) return;
-  el.textContent = text;
-  el.style.color = ok ? "#5ee17f" : "#ff948c";
-}
-
-/* ── event bindings ── */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Event Bindings
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 document.getElementById("new-chat").onclick = createChat;
 document.getElementById("save-config").onclick = saveConfig;
@@ -762,12 +919,25 @@ document.getElementById("apply-model-preset").onclick = applyModelPreset;
 document.getElementById("load-model-preset").onclick = loadModelPreset;
 document.getElementById("start-server").onclick = startServer;
 document.getElementById("stop-server").onclick = stopServer;
+document.getElementById("check-rpc").onclick = checkRpcEndpoint;
+document.getElementById("run-preflight").onclick = runPreflight;
 document.getElementById("refresh-models").onclick = refreshModels;
 document.getElementById("load-selected-model").onclick = loadSelectedModel;
 document.getElementById("start-download").onclick = startDownload;
 document.getElementById("send-message").onclick = sendMessage;
 document.getElementById("apply-preset").onclick = applyPresetToComposer;
 document.getElementById("run-preset").onclick = runPreset;
+
+// Settings drawer
+document.getElementById("settings-btn").onclick = openDrawer;
+document.getElementById("open-settings-btn").onclick = openDrawer;
+document.getElementById("close-drawer").onclick = closeDrawer;
+document.getElementById("drawer-backdrop").onclick = closeDrawer;
+
+// Sidebar toggle (mobile)
+document.getElementById("toggle-sidebar").onclick = toggleSidebar;
+
+// Candidate model select
 document.getElementById("candidate_models").onchange = (event) => {
   if (event.target.value) {
     document.getElementById("model_path").value = event.target.value;
@@ -775,6 +945,14 @@ document.getElementById("candidate_models").onchange = (event) => {
   }
 };
 
+// RPC field change handlers
+for (const field of ["runtime_mode", "rpc_host", "rpc_port", "rpc_tensor_split"]) {
+  const element = document.getElementById(field);
+  element.addEventListener("input", updateRpcGuide);
+  element.addEventListener("change", updateRpcGuide);
+}
+
+// Composer: Ctrl+Enter to send
 document.getElementById("message-input").addEventListener("keydown", async (event) => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
@@ -782,25 +960,39 @@ document.getElementById("message-input").addEventListener("keydown", async (even
   }
 });
 
-document.getElementById("init-browser").onclick = initBrowserMode;
-document.getElementById("load-browser-model").onclick = loadBrowserModel;
+// Composer: auto-resize on input
+document.getElementById("message-input").addEventListener("input", function () {
+  autoResizeTextarea(this);
+});
 
-/* ── init ── */
+// Escape to close drawer
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeDrawer();
+    document.getElementById("sidebar").classList.remove("open");
+  }
+});
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Initialize
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 (async function init() {
-  loadPromptPresets();
-
-  if (detectWebGPU()) {
-    document.getElementById("browser-section").classList.add("available");
+  // Initialize Lucide icons
+  if (window.lucide) {
+    lucide.createIcons();
   }
 
+  loadPromptPresets();
   await refreshConfig();
   await refreshModels();
   await refreshChats();
   await refreshServerStatus();
+  await runPreflight();
   if (state.chats.length > 0) {
     await loadChat(state.chats[0].chat_id);
   }
-
   setInterval(refreshModels, 5000);
+  setInterval(refreshServerStatus, 5000);
+  setInterval(refreshDiagnostics, 5000);
 })();

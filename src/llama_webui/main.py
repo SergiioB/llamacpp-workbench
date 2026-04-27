@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import suppress
 from typing import Any
 
 import uvicorn
@@ -19,6 +20,7 @@ from .model_inventory import (
     list_candidate_models,
     scan_models,
 )
+from .preflight import run_preflight
 from .settings import PROJECT_ROOT, STATIC_DIR, data_dir, default_download_dir
 
 state = AppState(PROJECT_ROOT)
@@ -34,6 +36,14 @@ class ConfigPayload(BaseModel):
 
 
 class StartPayload(BaseModel):
+    config: dict[str, Any] | None = None
+
+
+class RpcPreflightPayload(BaseModel):
+    config: dict[str, Any] | None = None
+
+
+class PreflightPayload(BaseModel):
     config: dict[str, Any] | None = None
 
 
@@ -82,14 +92,96 @@ def server_status() -> dict[str, Any]:
     return {"config": config, "status": status}
 
 
+@app.post("/api/rpc/preflight")
+def rpc_preflight(payload: RpcPreflightPayload) -> dict[str, Any]:
+    config = {**state.get_config(), **(payload.config or {})}
+    status = manager.health(config)
+    if status.get("managed") and status.get("pid"):
+        host = str(config.get("rpc_host") or "").strip()
+        try:
+            port = int(config.get("rpc_port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        endpoint = f"{host}:{port}" if host and port > 0 else ""
+        return {"enabled": True, "reachable": True, "endpoint": endpoint, "active": True}
+    return manager.rpc_preflight(config)
+
+
+async def _bg_start(config: dict[str, Any]) -> None:
+    """Run manager.start in a worker thread so we don't block the event loop."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    with suppress(Exception):
+        await loop.run_in_executor(None, manager.start, config)
+
+
+@app.post("/api/preflight")
+def preflight_check(payload: PreflightPayload | None = None) -> dict[str, Any]:
+    """Run all preflight checks and return readiness status."""
+    config = {**state.get_config(), **((payload.config if payload else None) or {})}
+    status = manager.health(config)
+    if status.get("managed") and status.get("pid"):
+        if status.get("healthy"):
+            return {
+                "ready": True,
+                "checks": {"server": status},
+                "blocking_issues": [],
+                "warnings": [],
+                "log_diagnoses": [],
+            }
+        return {
+            "ready": False,
+            "checks": {"server": status},
+            "blocking_issues": [],
+            "warnings": ["llama-server is starting; readiness checks are paused."],
+            "log_diagnoses": [],
+        }
+    return run_preflight(config, log_path=manager.log_path)
+
+
+@app.get("/api/server/logs")
+def server_logs(lines: int = 80) -> dict[str, Any]:
+    """Return last N lines of llama-server log with parsed diagnoses."""
+    from .preflight import parse_log_errors
+
+    log_text = ""
+    if manager.log_path.exists():
+        try:
+            raw = manager.log_path.read_text(encoding="utf-8", errors="replace")
+            all_lines = raw.splitlines()
+            log_text = "\n".join(all_lines[-lines:])
+        except OSError:
+            pass
+
+    diagnoses = parse_log_errors(log_text)
+    # Also include the start error file
+    start_error = manager.last_start_error()
+
+    return {
+        "log_tail": log_text,
+        "diagnoses": diagnoses,
+        "start_error": start_error,
+    }
+
+
 @app.post("/api/server/start")
-def start_server(payload: StartPayload) -> dict[str, Any]:
+async def start_server(payload: StartPayload) -> dict[str, Any]:
     config = state.save_config(payload.config or state.get_config())
-    try:
-        status = manager.start(config)
-        return {"status": status}
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+    status = manager.health(config)
+    if status.get("managed") and status.get("healthy"):
+        return {"status": "online", "server": status}
+    # Run preflight checks — reject if critical checks fail
+    preflight = run_preflight(config, log_path=manager.log_path)
+    if not preflight["ready"]:
+        issues = "; ".join(preflight["blocking_issues"])
+        raise HTTPException(
+            status_code=500,
+            detail=f"Launch blocked: {issues}",
+        )
+    # Spawn llama.cpp in background — frontend polls /api/server/status
+    import asyncio
+    asyncio.get_event_loop().create_task(_bg_start(config))
+    return {"status": "starting"}
 
 
 @app.post("/api/server/stop")
@@ -109,15 +201,13 @@ def list_models() -> dict[str, Any]:
 
 
 @app.post("/api/models/load")
-def load_model(payload: ModelLoadPayload) -> dict[str, Any]:
+async def load_model(payload: ModelLoadPayload) -> dict[str, Any]:
     config = state.get_config()
     config = apply_model_profile(config, payload.model_path)
     config = state.save_config(config)
-    try:
-        status = manager.start(config)
-        return {"config": config, "status": status}
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+    import asyncio
+    asyncio.get_event_loop().create_task(_bg_start(config))
+    return {"config": config, "status": "starting"}
 
 
 @app.post("/api/models/download")

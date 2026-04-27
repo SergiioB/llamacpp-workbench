@@ -175,6 +175,120 @@ See [WINDOWS_SETUP_GUIDE.md](./WINDOWS_SETUP_GUIDE.md) and [SETUP_MISSING_COMPON
 
 Open `http://<host>:8095`.
 
+## llama.cpp RPC Mode
+
+The WebUI can start `llama-server` either on one machine or with llama.cpp RPC
+offload to another reachable device. In this mode there are two roles:
+
+- **Coordinator host**: runs `llama-webui` and starts `llama-server`.
+- **RPC worker host**: runs `rpc-server` and exposes one accelerator or CPU
+  backend over TCP.
+
+The worker must already be running before the coordinator starts or loads a
+model. The coordinator passes `--rpc <host>:<port>`, `--split-mode layer`, and
+optionally `--tensor-split` to `llama-server`.
+
+### 1. Prepare the RPC worker
+
+Install or copy a compatible llama.cpp build onto the worker. Use the same
+llama.cpp build as the coordinator when possible; protocol mismatches can fail
+during model load.
+
+On Windows, open PowerShell on the worker:
+
+```powershell
+cd C:\path\to\llama.cpp\bin
+.\rpc-server.exe -H 0.0.0.0 -p 50052 -c
+```
+
+On Linux, start the equivalent binary from the build directory:
+
+```bash
+cd /path/to/llama.cpp/build/bin
+./rpc-server -H 0.0.0.0 -p 50052 -c
+```
+
+The worker log should print the endpoint, transport, and visible devices. For a
+CUDA worker, also check:
+
+```powershell
+nvidia-smi
+```
+
+If the worker has a firewall enabled, allow inbound TCP on the selected port
+(`50052` in the examples). On Windows, the rule can be added from an elevated
+PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "llama.cpp RPC 50052" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 50052
+```
+
+Only expose this port on a trusted LAN. llama.cpp RPC is an experimental
+internal transport, not an authenticated public API.
+
+### 2. Configure the WebUI coordinator
+
+Open Settings in the WebUI and set:
+
+- `Runtime -> Mode`: `RPC Split`
+- `RPC Host`: the worker IP or DNS name, for example `192.168.1.60`
+- `Port`: the worker port, for example `50052`
+- `Tensor Split`: a comma-separated model-weight ratio, for example `34,66`
+
+Then click `Check` in the RPC panel. This verifies TCP reachability before any
+model is loaded.
+
+After the RPC check passes, select a scanned model or preset and press `Start`
+or `Load Preset`. During load, `llama-server` uploads tensors to the worker.
+That upload can take a while and the worker may refuse extra TCP probes while
+the active coordinator connection owns the RPC server. The WebUI treats a
+managed healthy `llama-server` as authoritative instead of re-probing the busy
+RPC port.
+
+### 3. Choose a tensor split
+
+`Tensor Split` is a comma-separated ratio that controls how much model weight is
+placed on each backend. It must match the coordinator device plus each RPC
+device in order.
+
+Examples:
+
+- `50,50`: roughly even split between local GPU and one RPC worker.
+- `34,66`: keep less model weight on a 12 GB display GPU and more on the remote
+  worker.
+- `70,30`: keep more weight local when the worker has less available VRAM.
+
+Tune the split against actual load success, free memory, prompt throughput, and
+token throughput. If the worker OOMs or disconnects during `set_tensor`, reduce
+the worker share or close competing GPU processes on the worker.
+
+RPC mode uses `--split-mode layer`. Layer offload moves activations across the
+network at layer boundaries and is the practical default for normal LAN links.
+The default KV cache policy remains `--flash-attn on --cache-type-k q8_0
+--cache-type-v q8_0` so long-context serving keeps VRAM use predictable.
+
+### Troubleshooting
+
+If `Check RPC` fails before model load, verify:
+
+- the remote `rpc-server` process is running
+- the host/IP and port match the WebUI fields
+- the firewall allows inbound TCP on the RPC port
+- both devices are on the same network or otherwise routable
+- the remote accelerator is visible to its local runtime, for example through
+  `nvidia-smi`, `rocminfo`, `clinfo`, or the vendor tool for that device
+
+If the model starts loading but then the worker logs `recv failed`, restart the
+worker `rpc-server`, stop the local `llama-server`, and try a smaller or more
+conservative split. A half-loaded local `llama-server` can hold VRAM even after
+the RPC worker died; use the WebUI `Stop` button or terminate that process
+before relaunching.
+
+If the model is already loaded and chat works, a direct TCP probe to the worker
+may fail because the active `llama-server` connection is using the RPC server.
+In that state, trust `/api/server/status` or the WebUI server indicator over a
+standalone port probe.
+
 ## Recommended RK3588 Defaults
 
 For a `Radxa ROCK 5B+` or other `RK3588` board, the practical interactive baseline is:

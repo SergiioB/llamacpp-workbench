@@ -49,6 +49,9 @@ def _is_excluded_model(name: str) -> bool:
 
 def detect_model_size_billions(model_path: str) -> float | None:
     name = _name(model_path)
+    match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*b(?![a-z])", name)
+    if match:
+        return float(match.group(1))
     for size_hint, score in _SIZE_HINTS:
         if size_hint in name:
             return float(score)
@@ -66,6 +69,106 @@ def is_moe_model(model_path: str) -> bool:
 def is_reap_model(model_path: str) -> bool:
     name = _name(model_path)
     return "reap" in name or "prune" in name or "pruned" in name
+
+
+def _is_qwen36(model_path: str) -> bool:
+    name = _name(model_path)
+    return "qwen3.6" in name or ("qwen" in name and "3.6" in name)
+
+
+def _is_qwen36_moe_35b(model_path: str) -> bool:
+    name = _name(model_path)
+    return _is_qwen36(model_path) and "35b" in name and "a3b" in name and not is_reap_model(model_path)
+
+
+def _is_qwen36_dense_27b(model_path: str) -> bool:
+    name = _name(model_path)
+    return _is_qwen36(model_path) and "27b" in name and "dflash" not in name
+
+
+def _is_qwen36_reap_28b(model_path: str) -> bool:
+    name = _name(model_path)
+    return _is_qwen36(model_path) and "28b" in name and is_reap_model(model_path)
+
+
+def _is_qwen36_hauhau_uncensored(model_path: str) -> bool:
+    name = _name(model_path)
+    return _is_qwen36(model_path) and "hauhau" in name and "uncensored" in name
+
+
+def _is_qwen35_size(model_path: str, size_b: float) -> bool:
+    name = _name(model_path)
+    return "qwen3.5" in name and detect_model_size_billions(model_path) == size_b
+
+
+def _validation_metadata(model_path: str) -> dict[str, str]:
+    name = _name(model_path)
+    if _is_qwen36_moe_35b(model_path) and "ud-iq3_s" in name:
+        return {
+            "validation_status": "recommended",
+            "validation_label": "RPC best",
+            "validation_note": "RPC-validated winner: 128K Q8 KV, 39.6 tok/s, quality tests passed.",
+        }
+    if _is_qwen36_dense_27b(model_path):
+        return {
+            "validation_status": "fallback",
+            "validation_label": "RPC fallback",
+            "validation_note": "RPC-validated dense fallback: 64K Q8 KV, 18.5 tok/s, quality tests passed.",
+        }
+    if _is_qwen36_reap_28b(model_path):
+        return {
+            "validation_status": "avoid",
+            "validation_label": "RPC avoid",
+            "validation_note": "RPC-tested fast, but failed factual quality checks after expert pruning.",
+        }
+    if _is_qwen36_hauhau_uncensored(model_path):
+        if "q3_k_p" in name:
+            return {
+                "validation_status": "rpc_oom",
+                "validation_label": "RPC OOM",
+                "validation_note": "RPC-tested/reviewed: 18 GiB quant exceeds the practical 20 GiB combined VRAM budget.",
+            }
+        else:
+            return {
+                "validation_status": "rpc_constrained",
+                "validation_label": "RPC constrained",
+                "validation_note": "RPC-tested/reviewed: only fits at constrained 2/8 split with 8K context and is too slow for this setup.",
+            }
+    if _is_qwen35_size(model_path, 9):
+        return {
+            "validation_status": "validated",
+            "validation_label": "Validated 9B",
+            "validation_note": "Validated smaller Qwen quality tier; practical on 12GB-class CUDA.",
+        }
+    if _is_qwen35_size(model_path, 4):
+        return {
+            "validation_status": "validated",
+            "validation_label": "Validated 4B",
+            "validation_note": "Validated working fast tier; fits comfortably and was the known WebUI baseline.",
+        }
+    if _is_qwen35_size(model_path, 2):
+        return {
+            "validation_status": "validated",
+            "validation_label": "Validated 2B",
+            "validation_note": "Validated RK3588 fast CPU tier.",
+        }
+    if _is_qwen35_size(model_path, 27):
+        return {
+            "validation_status": "too_large",
+            "validation_label": "Too large",
+            "validation_note": "Seen in WebUI setup notes as too large for a single 12GB GPU.",
+        }
+    if _is_glm_flash_reap(model_path):
+        return {
+            "validation_status": "validated",
+            "validation_label": "RK3588 validated",
+            "validation_note": "Validated long-running REAP/RK3588 profile.",
+        }
+    return {
+        "validation_status": "unvalidated",
+        "validation_label": "Unvalidated",
+        "validation_note": "Scanned GGUF; no local benchmark verdict recorded.",
+    }
 
 
 def estimate_vram_gib(model_path: str) -> dict[str, Any]:
@@ -97,9 +200,15 @@ def estimate_vram_gib(model_path: str) -> dict[str, Any]:
 
 
 def suggest_gpu_layers(model_path: str, available_vram_gib: float | None = None) -> int:
+    """Suggest GPU layers based on available VRAM.
+
+    The estimate intentionally leaves headroom for display use, CUDA/runtime
+    overhead, KV cache, and transient compute buffers.
+    """
     if available_vram_gib is not None:
         file_gib = Path(model_path).stat().st_size / (1024 ** 3) if Path(model_path).exists() else 0
-        usable = available_vram_gib * 0.85
+        # Leave 1.5GB for CUDA overhead, display, KV cache
+        usable = available_vram_gib - 1.5
         ratio = min(1.0, usable / file_gib) if file_gib > 0 else 1.0
         model_size = detect_model_size_billions(model_path)
         if model_size is not None and model_size > 0:
@@ -107,16 +216,19 @@ def suggest_gpu_layers(model_path: str, available_vram_gib: float | None = None)
             return max(1, int(total_layers * ratio))
         return 99 if ratio >= 0.95 else 50
 
+    # Conservative defaults for consumer GPUs when exact free VRAM is unknown.
     model_size = detect_model_size_billions(model_path)
     if model_size is None:
         return 99
     if model_size >= 70:
-        return 40
+        return 30  # Very partial offload
     if model_size >= 27:
-        return 50
+        return 35
     if model_size >= 18:
-        return 60
-    return 99
+        return 50
+    if model_size >= 13:
+        return 70
+    return 99  # 9B and below fit fully
 
 
 def _estimate_total_layers(model_size: float, moe: bool) -> int:
@@ -144,17 +256,33 @@ def _rk3588_profile() -> dict[str, Any]:
     return {"cpu_mask": "", "threads": max(1, min(4, detected_cpus))}
 
 
-def _rk3588_custom_args() -> str:
+def _platform_custom_args(model_path: str) -> str:
+    """Return platform-appropriate custom KV cache args."""
     if IS_RK3588:
-        return "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning off --reasoning-budget 0 --reasoning-format none"
-    return "--cache-type-k q8_0 --cache-type-v q4_0"
+        return f"{_kv_cache_args(model_path)} --reasoning off --reasoning-budget 0 --reasoning-format none"
+    return _kv_cache_args(model_path)
 
 
-def _kv_cache_args(model_path: str) -> str:
-    model_size = detect_model_size_billions(model_path)
-    if model_size is not None and model_size <= 14:
-        return "--cache-type-k q8_0 --cache-type-v q8_0"
-    return "--cache-type-k q8_0 --cache-type-v q4_0"
+def _kv_cache_args(_model_path: str) -> str:
+    """Choose KV cache quantization based on model size.
+
+    Quantized V cache requires Flash Attention in llama.cpp. Keep both K and V
+    at q8_0 because long-context testing gets the VRAM win without the
+    quality regressions seen from more aggressive cache choices.
+    """
+    return "--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0"
+
+
+def _reasoning_disabled_args(model_path: str) -> str:
+    return f"{_kv_cache_args(model_path)} --reasoning off --reasoning-budget 0 --reasoning-format none"
+
+
+def _apply_rpc_split_default(config: dict[str, Any], split: str) -> None:
+    if str(config.get("runtime_mode") or "local").strip().lower() != "rpc":
+        return
+    if str(config.get("rpc_tensor_split") or "").strip():
+        return
+    config["rpc_tensor_split"] = split
 
 
 def _is_glm_flash_reap(model_path: str) -> bool:
@@ -178,6 +306,32 @@ def _find_matching_model(candidates: list[str], predicate: Callable[[str], bool]
     return max(matches, key=model_sort_key)
 
 
+def _preset_label(model_path: str) -> str:
+    parts: list[str] = []
+    name = _name(model_path)
+    if _is_qwen36(model_path):
+        parts.append("Qwen3.6")
+    elif "qwen" in name:
+        parts.append("Qwen")
+    elif "gemma" in name:
+        parts.append("Gemma")
+    elif "glm" in name:
+        parts.append("GLM")
+
+    model_size = detect_model_size_billions(model_path)
+    if model_size is not None:
+        parts.append(f"{model_size:g}B")
+    else:
+        parts.append(Path(model_path).stem[:28])
+
+    if is_moe_model(model_path):
+        parts.append("MoE")
+    if is_reap_model(model_path):
+        parts.append("REAP")
+    parts.append("CUDA")
+    return " ".join(parts)
+
+
 def list_candidate_models() -> list[str]:
     candidates: list[str] = []
     for root in model_roots():
@@ -190,18 +344,15 @@ def list_candidate_models() -> list[str]:
     return sorted(set(candidates), key=model_sort_key, reverse=True)
 
 
-def model_sort_key(model_path: str) -> tuple[int, int, int, int, str]:
+def model_sort_key(model_path: str) -> tuple[int, int, int, float, int, str]:
     name = _name(model_path)
-    size_score = 0
-    for size_hint, score in _SIZE_HINTS:
-        if size_hint in name:
-            size_score = score
-            break
+    size_score = detect_model_size_billions(model_path) or 0.0
 
+    qwen36_score = 1 if _is_qwen36(model_path) else 0
     a3b_score = 1 if "a3b" in name else 0
-    reap_score = 1 if "reap" in name or "prune" in name or "pruned" in name else 0
-    quant_score = 1 if "q4_k_m" in name or "q4_k_xl" in name else 0
-    return (a3b_score, reap_score, size_score, quant_score, name)
+    non_reap_score = 0 if is_reap_model(model_path) else 1
+    quant_score = 2 if "ud-iq3_s" in name else 1 if "q3_k_m" in name or "q4_k_m" in name or "q4_k_xl" in name else 0
+    return (qwen36_score, a3b_score, non_reap_score, size_score, quant_score, name)
 
 
 def select_preferred_model(candidates: list[str]) -> str | None:
@@ -231,6 +382,7 @@ def scan_models() -> list[dict[str, Any]]:
         name = path.name
         lower = name.lower()
         vram_info = estimate_vram_gib(model_path)
+        validation = _validation_metadata(model_path)
         models.append(
             {
                 "path": model_path,
@@ -243,6 +395,7 @@ def scan_models() -> list[dict[str, Any]]:
                 "model_size_b": vram_info["model_size_b"],
                 "vram": vram_info,
                 "sort_key": model_sort_key(model_path),
+                **validation,
             }
         )
     return sorted(models, key=lambda model: model["sort_key"], reverse=True)
@@ -270,7 +423,7 @@ def _apply_cpu_model_profile(
             "batch_size": batch_size,
             "ubatch_size": ubatch_size,
             "max_tokens": max_tokens,
-            "custom_args": custom_args or _rk3588_custom_args(),
+            "custom_args": custom_args or _platform_custom_args(""),
         }
     )
     if temperature is not None:
@@ -294,6 +447,26 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
     if GPU_BACKEND == "cuda":
         return _cuda_profile_for_model(tuned, lower, model_path)
 
+    if _is_qwen36_moe_35b(model_path):
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=131072,
+            batch_size=512,
+            ubatch_size=64,
+            max_tokens=2048,
+            custom_args=f"{_kv_cache_args(model_path)} --no-mmap --reasoning off --cache-ram 0",
+        )
+
+    if _is_qwen36_dense_27b(model_path):
+        return _apply_cpu_model_profile(
+            tuned,
+            ctx_size=65536,
+            batch_size=512,
+            ubatch_size=64,
+            max_tokens=2048,
+            custom_args=f"{_kv_cache_args(model_path)} --no-mmap --reasoning off --cache-ram 0",
+        )
+
     if _is_glm_flash_reap(model_path):
         return _apply_cpu_model_profile(
             tuned,
@@ -306,6 +479,7 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
             top_k=40,
             repeat_penalty=1.0,
             presence_penalty=0.0,
+            custom_args=_reasoning_disabled_args(model_path),
         )
 
     if _is_qwen_27b(model_path) or "27b" in lower:
@@ -357,19 +531,52 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
 
 
 def _cuda_profile_for_model(config: dict[str, Any], _lower: str, model_path: str) -> dict[str, Any]:
+    """Apply CUDA-optimized profile with automatic GPU layer estimation."""
     model_size = detect_model_size_billions(model_path)
     gpu_layers = suggest_gpu_layers(model_path)
     kv_args = _kv_cache_args(model_path)
 
+    if _is_qwen36_moe_35b(model_path):
+        config.update(
+            {
+                "gpu_layers": 999,
+                "ctx_size": 131072,
+                "parallel": 1,
+                "batch_size": 512,
+                "ubatch_size": 64,
+                "max_tokens": 2048,
+                "custom_args": f"{kv_args} --no-mmap --reasoning off --cache-ram 0",
+            }
+        )
+        _apply_rpc_split_default(config, "34,66")
+        return config
+
+    if _is_qwen36_dense_27b(model_path):
+        config.update(
+            {
+                "gpu_layers": 999,
+                "ctx_size": 65536,
+                "parallel": 1,
+                "batch_size": 512,
+                "ubatch_size": 64,
+                "max_tokens": 2048,
+                "custom_args": f"{kv_args} --no-mmap --reasoning off --cache-ram 0",
+            }
+        )
+        _apply_rpc_split_default(config, "34,66")
+        return config
+
     if _is_qwen_27b(model_path) or (model_size is not None and model_size >= 27):
-        ctx = 8192 if gpu_layers < 99 else 32768
+        # 27B models need partial offload on 12GB VRAM
+        # Use smaller context to save VRAM for weights
+        ctx = 4096 if gpu_layers < 99 else 32768
         config.update(
             {
                 "gpu_layers": gpu_layers,
                 "ctx_size": ctx,
-                "parallel": 4,
+                "parallel": 1,
                 "batch_size": 512,
-                "ubatch_size": 256,
+                "ubatch_size": 128,
                 "max_tokens": 2048,
                 "custom_args": kv_args,
             }
@@ -448,47 +655,65 @@ def build_model_presets(defaults: dict[str, Any], candidates: list[str] | None =
     available = list(candidates or list_candidate_models())
     presets: list[dict[str, Any]] = []
 
+    cuda_validated: tuple[tuple[Callable[[str], bool], str, str], ...] = (
+        (
+            lambda p: _is_qwen36_moe_35b(p) and "ud-iq3_s" in _name(p),
+            "Qwen3.6 MoE 35B 128K",
+            "Best measured profile: 128K Q8 KV, Flash Attention, 39.6 tok/s, quality tests passed.",
+        ),
+        (
+            _is_qwen36_dense_27b,
+            "Qwen3.6 Dense 27B 64K",
+            "Validated dense fallback: 64K Q8 KV, 18.5 tok/s, quality tests passed.",
+        ),
+        (
+            lambda p: _is_qwen35_size(p, 9),
+            "Qwen3.5 9B CUDA",
+            "Validated smaller quality tier; practical on 12GB-class CUDA.",
+        ),
+        (
+            lambda p: _is_qwen35_size(p, 4),
+            "Qwen3.5 4B CUDA",
+            "Validated working fast tier and known WebUI baseline.",
+        ),
+    )
+
     if GPU_BACKEND == "cuda":
-        for finder in (
-            lambda p: "27b" in p.lower() and "qwen" in p.lower(),
-            lambda p: "9b" in p.lower() or "8b" in p.lower(),
-            lambda p: "4b" in p.lower() or "3b" in p.lower(),
-        ):
+        seen_paths: set[str] = set()
+
+        def append_preset(match: str, label: str | None = None, description: str | None = None) -> None:
+            if match in seen_paths:
+                return
+            seen_paths.add(match)
+            vram = estimate_vram_gib(match)
+            gpu_layers = suggest_gpu_layers(match)
+            fits_note = " (partial GPU offload)" if gpu_layers < 99 else ""
+            presets.append(
+                {
+                    "id": f"cuda-{Path(match).stem}",
+                    "label": label or _preset_label(match),
+                    "description": description
+                    or f"Benchmark-validated CUDA profile. Est. {vram['min_vram_gib']} GiB VRAM{fits_note}.",
+                    "config": apply_model_profile(
+                        {
+                            **defaults,
+                            "temperature": 0.8,
+                            "top_p": 0.95,
+                            "top_k": 40,
+                            "min_p": 0.0,
+                            "repeat_penalty": 1.05,
+                            "presence_penalty": 0.0,
+                        },
+                        match,
+                    ),
+                }
+            )
+
+        for finder, label_override, description_override in cuda_validated:
             match = _find_matching_model(available, finder)
             if match:
-                vram = estimate_vram_gib(match)
-                label_parts: list[str] = []
-                model_size = detect_model_size_billions(match)
-                if model_size is not None:
-                    label_parts.append(f"{int(model_size)}B")
-                label_parts.append("CUDA")
-                if is_moe_model(match):
-                    label_parts.append("MoE")
-                label = " ".join(label_parts)
-                gpu_layers = suggest_gpu_layers(match)
-                fits_note = ""
-                if gpu_layers < 99:
-                    fits_note = " (partial GPU offload)"
-                presets.append(
-                    {
-                        "id": f"cuda-{Path(match).stem}",
-                        "label": label,
-                        "description": f"CUDA profile for {Path(match).name}. "
-                        f"Est. {vram['min_vram_gib']} GiB VRAM{fits_note}.",
-                        "config": apply_model_profile(
-                            {
-                                **defaults,
-                                "temperature": 0.8,
-                                "top_p": 0.95,
-                                "top_k": 40,
-                                "min_p": 0.0,
-                                "repeat_penalty": 1.05,
-                                "presence_penalty": 0.0,
-                            },
-                            match,
-                        ),
-                    }
-                )
+                append_preset(match, label_override, description_override)
+
         return presets
 
     day_model = _find_matching_model(available, _is_day_qwen)

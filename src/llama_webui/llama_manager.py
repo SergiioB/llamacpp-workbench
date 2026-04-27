@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -64,38 +65,128 @@ class LlamaServerManager:
             body = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"llama.cpp HTTP {error.code}: {body}") from error
 
-    @staticmethod
-    def _pid_exists(pid: int) -> bool:
-        if os.name == "nt":
-            try:
-                import ctypes
+    def _rpc_enabled(self, config: dict[str, Any]) -> bool:
+        return str(config.get("runtime_mode") or "local").strip().lower() == "rpc"
 
-                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-                handle = kernel32.OpenProcess(0x0400, False, pid)
-                if handle:
-                    kernel32.CloseHandle(handle)
-                    return True
-                return False
-            except Exception:
-                return False
+    def _rpc_endpoint(self, config: dict[str, Any]) -> tuple[str, int, str]:
+        host = str(config.get("rpc_host") or "").strip()
         try:
-            os.kill(pid, 0)
-            return True
-        except (ProcessLookupError, PermissionError, OSError):
-            return False
+            port = int(config.get("rpc_port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        endpoint = f"{host}:{port}" if host and port > 0 else ""
+        return host, port, endpoint
+
+    def rpc_preflight(self, config: dict[str, Any]) -> dict[str, Any]:
+        if not self._rpc_enabled(config):
+            return {"enabled": False, "reachable": True, "endpoint": ""}
+
+        host, port, endpoint = self._rpc_endpoint(config)
+        if not host or port <= 0:
+            return {
+                "enabled": True,
+                "reachable": False,
+                "endpoint": endpoint,
+                "error": "RPC host and port are required",
+            }
+
+        try:
+            with socket.create_connection((host, port), timeout=3.0):
+                pass
+        except OSError as error:
+            return {
+                "enabled": True,
+                "reachable": False,
+                "endpoint": endpoint,
+                "error": str(error),
+            }
+
+        return {"enabled": True, "reachable": True, "endpoint": endpoint}
+
+    def _server_args(self, config: dict[str, Any]) -> list[str]:
+        args: list[str] = []
+        cpu_mask = str(config.get("cpu_mask") or "").strip()
+        # taskset is Linux-only; skip it on Windows
+        if cpu_mask and os.name != "nt":
+            args.extend(["taskset", "-c", cpu_mask])
+        args.extend([
+            str(config["llama_binary"]),
+            "--host", str(config["llama_host"]),
+            "--port", str(config["llama_port"]),
+            "--model", str(config["model_path"]),
+            "--ctx-size", str(config["ctx_size"]),
+            "--threads", str(config["threads"]),
+            "--parallel", str(config["parallel"]),
+            "--n-gpu-layers", str(config["gpu_layers"]),
+            "--batch-size", str(config["batch_size"]),
+            "--ubatch-size", str(config["ubatch_size"]),
+        ])
+
+        gpu_backend = str(config.get("gpu_backend") or "auto").strip()
+        if gpu_backend not in ("auto", ""):
+            args.extend([f"--{gpu_backend}"])
+
+        if self._rpc_enabled(config):
+            _host, _port, endpoint = self._rpc_endpoint(config)
+            split = str(config.get("rpc_tensor_split") or "").strip()
+            if not endpoint:
+                raise RuntimeError("RPC host and port are required")
+            if not split:
+                raise RuntimeError("RPC mode requires a tensor split, for example 34,66 for the validated two-GPU profile.")
+            args.extend(["--rpc", endpoint, "--split-mode", "layer"])
+            args.extend(["--tensor-split", split])
+
+        if str(config.get("custom_args") or "").strip():
+            args.extend(shlex.split(str(config["custom_args"])))
+        return args
 
     def _managed_pid(self) -> int | None:
         if self.process and self.process.poll() is None:
             return self.process.pid
+        if self.process and self.process.poll() is not None:
+            self.process = None
+            with suppress(FileNotFoundError):
+                self.pid_path.unlink()
+            return None
         try:
             pid = int(self.pid_path.read_text().strip())
         except (FileNotFoundError, ValueError):
             return None
-        if not self._pid_exists(pid):
+        # On Windows, os.kill(pid, 0) can fail with PermissionError even for
+        # valid PIDs, so we just try to check if the process exists
+        if os.name == "nt":
+            # Use Windows-specific process check
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x1000, False, pid)
+                if handle:
+                    exit_code = ctypes.c_ulong()
+                    still_active = 259
+                    if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) and exit_code.value == still_active:
+                        kernel32.CloseHandle(handle)
+                        return pid
+                    kernel32.CloseHandle(handle)
+            except Exception:
+                pass
             with suppress(FileNotFoundError):
                 self.pid_path.unlink()
             return None
-        return pid
+        else:
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError, OSError):
+                with suppress(FileNotFoundError):
+                    self.pid_path.unlink()
+                return None
+            return pid
+
+    def last_start_error(self) -> str:
+        error_path = self.log_path.with_name("llama-start-error.txt")
+        try:
+            return error_path.read_text(encoding="utf-8", errors="replace").strip()
+        except FileNotFoundError:
+            return ""
 
     def health(self, config: dict[str, Any]) -> dict[str, Any]:
         managed_pid = self._managed_pid()
@@ -114,38 +205,53 @@ class LlamaServerManager:
                 "models": [],
                 "pid": managed_pid,
                 "error": str(error),
+                "start_error": self.last_start_error(),
             }
 
     def start(self, config: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._start_impl(config)
+        except Exception as e:
+            error_path = self.log_path.with_name("llama-start-error.txt")
+            with open(error_path, "w", encoding="utf-8") as f:
+                import traceback
+                f.write(f"Error: {e}\n\n")
+                f.write(traceback.format_exc())
+            with suppress(Exception):
+                self.stop()
+            raise
+
+    def _start_impl(self, config: dict[str, Any]) -> dict[str, Any]:
         self.stop()
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        args: list[str] = []
-        cpu_mask = str(config.get("cpu_mask") or "").strip()
-        if cpu_mask and os.name != "nt":
-            args.extend(["taskset", "-c", cpu_mask])
-        args.extend([
-            str(config["llama_binary"]),
-            "--host", str(config["llama_host"]),
-            "--port", str(config["llama_port"]),
-            "--model", str(config["model_path"]),
-            "--ctx-size", str(config["ctx_size"]),
-            "--threads", str(config["threads"]),
-            "--parallel", str(config["parallel"]),
-            "--n-gpu-layers", str(config["gpu_layers"]),
-            "--batch-size", str(config["batch_size"]),
-            "--ubatch-size", str(config["ubatch_size"]),
-        ])
-        gpu_backend = str(config.get("gpu_backend") or "auto").strip()
-        if gpu_backend not in ("auto", ""):
-            args.extend([f"--{gpu_backend}"])
-        custom_args_str = str(config.get("custom_args") or "").strip()
-        if custom_args_str:
-            if os.name == "nt":
-                args.extend(custom_args_str.split())
-            else:
-                args.extend(shlex.split(custom_args_str))
+        with suppress(FileNotFoundError):
+            self.log_path.with_name("llama-start-error.txt").unlink()
+        self.log_path.write_bytes(b"")
+
+        # Debug: dump config being used
+        import json as _json
+        debug_path = self.log_path.with_name("llama-start-debug.txt")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            _json.dump(config, f, indent=2, default=str)
+
+        if self._rpc_enabled(config):
+            preflight = self.rpc_preflight(config)
+            if not preflight["reachable"]:
+                endpoint = preflight.get("endpoint") or "<unset>"
+                error = preflight.get("error") or "unknown error"
+                raise RuntimeError(f"RPC endpoint {endpoint} is not reachable: {error}")
+
+        args = self._server_args(config)
 
         log_handle = self.log_path.open("ab")
+        # Debug: write command to file
+        debug_path = self.log_path.with_name("llama-cmd-debug.txt")
+        with open(debug_path, "w") as f:
+            f.write("Popen args:\n")
+            f.write(" ".join(args))
+            f.write("\n\nPopen kwargs:\n")
+            f.write(f"stdout={log_handle.name}, stderr={log_handle.name}\n")
+            f.write(f"os.name={os.name}\n")
         self.process = subprocess.Popen(args, stdout=log_handle, stderr=log_handle)
         self.pid_path.write_text(f"{self.process.pid}\n")
         self.started_with = dict(config)
@@ -156,25 +262,16 @@ class LlamaServerManager:
             status = self.health(config)
             if status["healthy"]:
                 return status
-            if self.process.poll() is not None:
-                last_error = f"llama-server exited with code {self.process.returncode}"
+            process = self.process
+            if process is None:
+                last_error = status.get("error") or "llama-server exited"
+                break
+            if process.poll() is not None:
+                last_error = f"llama-server exited with code {process.returncode}"
                 break
             last_error = status.get("error", last_error)
             time.sleep(1)
         raise RuntimeError(last_error)
-
-    def _terminate_pid(self, pid: int) -> None:
-        if os.name == "nt":
-            with suppress(OSError, subprocess.TimeoutExpired):
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=10,
-                    check=False,
-                )
-        else:
-            with suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGTERM)
 
     def stop(self) -> None:
         try:
@@ -189,10 +286,29 @@ class LlamaServerManager:
             else:
                 managed_pid = self._managed_pid()
                 if managed_pid is not None:
-                    self._terminate_pid(managed_pid)
+                    try:
+                        if os.name == "nt":
+                            # On Windows, use taskkill for better compatibility
+                            result = subprocess.run(
+                                ["taskkill", "/F", "/PID", str(managed_pid)],
+                                capture_output=True,
+                                timeout=10,
+                                check=False,
+                            )
+                            # Ignore "process not found" errors
+                            if result.returncode not in (0, 128, 255):
+                                pass  # Success or process already terminated
+                        else:
+                            os.kill(managed_pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
+                        # Process already terminated or access denied, continue cleanup
+                        pass
+            self.process = None
+            self.started_with = None
+            with suppress(FileNotFoundError):
+                self.pid_path.unlink()
         except Exception:
-            pass
-        finally:
+            # On Windows, any error during stop should just be logged and cleanup attempted
             self.process = None
             self.started_with = None
             with suppress(FileNotFoundError):
