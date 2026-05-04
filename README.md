@@ -2,7 +2,7 @@
 
 # llama-webui
 
-> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, and RK3588-aware tuning.
+> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, RPC split serving, and hardware-aware tuning from RK3588 boards to Windows CUDA systems.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,10 +15,11 @@
 
 `llama-webui` is a standalone local web interface for `llama.cpp`, intentionally without Ollama. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
 
-This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves two purposes:
+This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves three purposes:
 
 - A practical remote web UI for loading and serving local GGUF models with `llama.cpp`
 - A documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
+- A serious-workload control plane for Windows CUDA hosts, including Windows-to-Windows `llama.cpp` RPC split serving across a LAN
 
 The main point is simple: keep the convenience of a web UI without giving up the flags that decide whether local inference is actually usable.
 
@@ -36,6 +37,7 @@ Many local-AI UIs optimize for convenience first and runtime visibility second. 
   - reasoning / no-thinking mode
 - It treats benchmark-backed hardware tuning as a feature, not background trivia.
 - It is intentionally credible on small ARM systems, especially the `Radxa ROCK 5B+` with `RK3588`, not only on desktop GPUs.
+- It supports `llama.cpp` RPC split serving, so one coordinator can combine local and remote compute instead of being limited to a single box.
 
 If you just want a generic chat shell, other tools already cover that. This repo is for people who want a usable web UI without giving up the runtime knobs that explain real behavior.
 
@@ -85,6 +87,7 @@ Most local-AI tools talk about ARM boards as a novelty. This repo does not.
 - Persistent chat history in SQLite
 - Model discovery from configurable GGUF directories
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
+- `llama.cpp` RPC split mode for LAN-connected worker machines
 - RK3588-tested presets for fast daytime use and stronger overnight use
 - explicit no-thinking defaults for interactive serving, plus visible-response sanitation when models leak empty think wrappers anyway
 
@@ -187,6 +190,11 @@ offload to another reachable device. In this mode there are two roles:
 The worker must already be running before the coordinator starts or loads a
 model. The coordinator passes `--rpc <host>:<port>`, `--split-mode layer`, and
 optionally `--tensor-split` to `llama-server`.
+
+This mode has been validated for real Windows-to-Windows local workloads: a
+Windows desktop coordinator can drive a Windows laptop RPC worker on the same
+LAN, combining CUDA devices while keeping the WebUI as the single control
+surface.
 
 ### 1. Prepare the RPC worker
 
@@ -440,6 +448,13 @@ The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ub
 - RAM: 32 GB
 - CUDA: 12.8+ for Blackwell-class support
 
+### Windows-to-Windows RPC
+
+- Coordinator: Windows desktop running `llama-webui` and `llama-server`
+- Worker: Windows laptop running `rpc-server`
+- Transport: trusted LAN TCP with `--rpc`, `--split-mode layer`, and tuned `--tensor-split`
+- Workload class: serious interactive local inference, not only toy demos
+
 See [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md) and [docs/hardware-portability.md](./docs/hardware-portability.md).
 
 ## Hardware Scope
@@ -508,6 +523,7 @@ Reason:
 | Model scanning/loading | ✅ Production-ready |
 | Streaming responses | ✅ Production-ready |
 | Benchmark helpers | ✅ Production-ready |
+| Windows-to-Windows RPC split serving | ✅ Validated |
 | RK3588-tuned presets | ✅ Production-ready |
 | Windows setup flow | ✅ Available |
 | Corpus ingestion | 🔜 Planned |
