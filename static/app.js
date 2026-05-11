@@ -596,10 +596,14 @@ function startRenameChat(itemEl, chat) {
     const newTitle = input.value.trim();
     itemEl.classList.remove("editing");
     if (newTitle && newTitle !== chat.title) {
-      // Update via API — we need to send a rename request
-      // The backend doesn't have a rename endpoint, so we'll update locally
-      // by saving the chat with the new title via the message flow
-      // For now, update the title in state and re-render
+      try {
+        await api(`/api/chats/${chat.chat_id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title: newTitle }),
+        });
+      } catch (e) {
+        showToast("Failed to rename chat", "error");
+      }
       chat.title = newTitle;
       renderChats();
       showToast("Chat renamed", "success", 2000);

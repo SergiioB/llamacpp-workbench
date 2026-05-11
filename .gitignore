@@ -55,6 +55,9 @@ wget-log
 logs/
 *.pid
 
+# Prebuilt binaries (downloaded separately)
+third_party/
+
 # Agent / factory tooling
 .factory/
 .factory/**

@@ -267,6 +267,15 @@ class AppState:
             "messages": [dict(row) for row in messages],
         }
 
+    def rename_chat(self, chat_id: int, title: str) -> None:
+        safe_title = title.strip()[:120] or "New chat"
+        with self._lock:
+            self._conn.execute(
+                "UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+                (safe_title, chat_id),
+            )
+            self._conn.commit()
+
     def delete_chat(self, chat_id: int) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))

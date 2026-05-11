@@ -10,6 +10,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from .app_state import AppState
 from .download_manager import ModelDownloadManager
@@ -28,6 +31,21 @@ manager = LlamaServerManager(state.log_path)
 downloads = ModelDownloadManager(data_dir() / "downloads", default_download_dir())
 
 app = FastAPI(title="llama-webui")
+
+
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    """Add no-cache headers to static assets so UI updates are always visible."""
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+
+app.add_middleware(NoCacheStaticMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -45,6 +63,10 @@ class RpcPreflightPayload(BaseModel):
 
 class PreflightPayload(BaseModel):
     config: dict[str, Any] | None = None
+
+
+class ChatRenamePayload(BaseModel):
+    title: str
 
 
 class ChatCreatePayload(BaseModel):
@@ -66,7 +88,10 @@ class ModelLoadPayload(BaseModel):
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/api/config")
@@ -252,6 +277,15 @@ def get_chat(chat_id: int) -> dict[str, Any]:
 def delete_chat(chat_id: int) -> dict[str, Any]:
     state.delete_chat(chat_id)
     return {"deleted": True}
+
+
+@app.patch("/api/chats/{chat_id}")
+def rename_chat(chat_id: int, payload: ChatRenamePayload) -> dict[str, Any]:
+    try:
+        state.rename_chat(chat_id, payload.title)
+        return {"chat": state.get_chat(chat_id)}
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.post("/api/chats/{chat_id}/messages")
