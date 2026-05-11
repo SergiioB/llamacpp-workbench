@@ -62,8 +62,12 @@ def test_qwen36_presets_include_moe_and_dense(monkeypatch):
     assert "Qwen3.6 Dense 27B 64K" in labels
     assert "11B CUDA" not in labels
 
-    moe_config = next(preset["config"] for preset in presets if preset["label"] == "Qwen3.6 MoE 35B 128K")
-    dense_config = next(preset["config"] for preset in presets if preset["label"] == "Qwen3.6 Dense 27B 64K")
+    moe_config = next(
+        preset["config"] for preset in presets if preset["label"] == "Qwen3.6 MoE 35B 128K"
+    )
+    dense_config = next(
+        preset["config"] for preset in presets if preset["label"] == "Qwen3.6 Dense 27B 64K"
+    )
     assert moe_config["ctx_size"] == 131072
     assert dense_config["ctx_size"] == 65536
     assert "--cache-type-v q8_0" in moe_config["custom_args"]

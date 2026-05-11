@@ -1,4 +1,5 @@
 """Tests for launch preflight checks."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -100,7 +101,7 @@ def test_check_rpc_protocol_reachable(monkeypatch):
         return FakeSock()
 
     monkeypatch.setattr("llama_webui.preflight.socket.create_connection", fake_connect)
-    result = check_rpc_protocol("10.0.0.20", 50052)
+    result = check_rpc_protocol("192.0.2.20", 50052)
     assert result["reachable"] is True
     assert result["protocol_ok"] is None
 
@@ -170,7 +171,7 @@ def test_run_preflight_rpc_missing_split(tmp_path):
     config = _base_config(tmp_path)
     Path(config["llama_binary"]).write_bytes(b"\x00")
     config["runtime_mode"] = "rpc"
-    config["rpc_host"] = "10.0.0.20"
+    config["rpc_host"] = "192.0.2.20"
     config["rpc_port"] = 50052
     config["rpc_tensor_split"] = ""
 
@@ -189,7 +190,10 @@ def test_run_preflight_rpc_missing_split(tmp_path):
         pf.socket.create_connection = original
 
     assert result["ready"] is False
-    assert any("rpc" in issue.lower() or "unreachable" in issue.lower() for issue in result["blocking_issues"])
+    assert any(
+        "rpc" in issue.lower() or "unreachable" in issue.lower()
+        for issue in result["blocking_issues"]
+    )
 
 
 def test_run_preflight_with_log_oom(tmp_path):

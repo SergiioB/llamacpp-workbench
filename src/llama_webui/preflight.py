@@ -5,6 +5,7 @@ Runs before every start attempt to catch common failure modes:
 - Remote RPC endpoint unreachable or protocol-incompatible
 - llama-server log OOM parsing with suggested fix
 """
+
 from __future__ import annotations
 
 import os
@@ -38,7 +39,12 @@ def check_local_vram() -> dict[str, Any]:
             timeout=5,
         )
         if result.returncode != 0:
-            return {"available": False, "reason": "nvidia_smi_failed", "free_mib": 0, "total_mib": 0}
+            return {
+                "available": False,
+                "reason": "nvidia_smi_failed",
+                "free_mib": 0,
+                "total_mib": 0,
+            }
 
         # Parse first GPU line: "5978, 12288"
         lines = result.stdout.strip().splitlines()
@@ -47,7 +53,12 @@ def check_local_vram() -> dict[str, Any]:
 
         parts = lines[0].split(",")
         if len(parts) < 2:
-            return {"available": False, "reason": "nvidia_smi_parse_error", "free_mib": 0, "total_mib": 0}
+            return {
+                "available": False,
+                "reason": "nvidia_smi_parse_error",
+                "free_mib": 0,
+                "total_mib": 0,
+            }
 
         free_mib = int(parts[0].strip())
         total_mib = int(parts[1].strip())
@@ -60,7 +71,12 @@ def check_local_vram() -> dict[str, Any]:
             "total_gib": round(total_mib / 1024, 2),
         }
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
-        return {"available": False, "reason": "nvidia_smi_unavailable", "free_mib": 0, "total_mib": 0}
+        return {
+            "available": False,
+            "reason": "nvidia_smi_unavailable",
+            "free_mib": 0,
+            "total_mib": 0,
+        }
 
 
 def _estimate_local_allocation_gib(
@@ -79,7 +95,7 @@ def _estimate_local_allocation_gib(
     path = Path(model_path)
     if not path.exists():
         return None
-    file_gib = path.stat().st_size / (1024 ** 3)
+    file_gib = path.stat().st_size / (1024**3)
 
     if str(runtime_mode).strip().lower() != "rpc":
         # Full model on local GPU
@@ -224,41 +240,53 @@ def parse_log_errors(log_text: str) -> list[dict[str, str]]:
     # CUDA OOM
     if _OOM_PATTERN.search(log_text):
         alloc_match = _ALLOC_PATTERN.search(log_text)
-        alloc_gib = f"{float(alloc_match.group(1)) / 1024:.1f} GiB" if alloc_match else "unknown amount"
-        diagnoses.append({
-            "type": "cuda_oom",
-            "severity": "critical",
-            "title": "CUDA Out of Memory",
-            "detail": f"llama-server tried to allocate {alloc_gib} on the local GPU and failed.",
-            "suggestion": (
-                "Close GPU-heavy apps (browsers, Discord, Steam, game overlays, Edge webviews) "
-                "to free VRAM, then try again. Alternatively, use a smaller model or a different "
-                "tensor split ratio."
-            ),
-        })
+        alloc_gib = (
+            f"{float(alloc_match.group(1)) / 1024:.1f} GiB" if alloc_match else "unknown amount"
+        )
+        diagnoses.append(
+            {
+                "type": "cuda_oom",
+                "severity": "critical",
+                "title": "CUDA Out of Memory",
+                "detail": f"llama-server tried to allocate {alloc_gib} on the local GPU and failed.",
+                "suggestion": (
+                    "Close GPU-heavy apps (browsers, Discord, Steam, game overlays, Edge webviews) "
+                    "to free VRAM, then try again. Alternatively, use a smaller model or a different "
+                    "tensor split ratio."
+                ),
+            }
+        )
 
     # Protocol mismatch
     if _PROTOCOL_MISMATCH.search(log_text):
-        diagnoses.append({
-            "type": "protocol_mismatch",
-            "severity": "critical",
-            "title": "RPC Protocol Mismatch",
-            "detail": "The RPC worker runs a different llama.cpp version than the coordinator.",
-            "suggestion": (
-                "Update the RPC worker to the same llama.cpp build as the coordinator. "
-                "Download a matching binary from the same release."
-            ),
-        })
+        diagnoses.append(
+            {
+                "type": "protocol_mismatch",
+                "severity": "critical",
+                "title": "RPC Protocol Mismatch",
+                "detail": "The RPC worker runs a different llama.cpp version than the coordinator.",
+                "suggestion": (
+                    "Update the RPC worker to the same llama.cpp build as the coordinator. "
+                    "Download a matching binary from the same release."
+                ),
+            }
+        )
 
     # Generic model load failure (when no more specific pattern matched)
-    if _MODEL_LOAD_ERROR.search(log_text) and not _OOM_PATTERN.search(log_text) and not _PROTOCOL_MISMATCH.search(log_text):
-        diagnoses.append({
-            "type": "model_load_error",
-            "severity": "critical",
-            "title": "Model Load Failed",
-            "detail": "llama-server failed to load the model. Check the log for details.",
-            "suggestion": "Check the full log for details. Common causes: corrupt model file, incompatible GGUF version, or insufficient resources.",
-        })
+    if (
+        _MODEL_LOAD_ERROR.search(log_text)
+        and not _OOM_PATTERN.search(log_text)
+        and not _PROTOCOL_MISMATCH.search(log_text)
+    ):
+        diagnoses.append(
+            {
+                "type": "model_load_error",
+                "severity": "critical",
+                "title": "Model Load Failed",
+                "detail": "llama-server failed to load the model. Check the log for details.",
+                "suggestion": "Check the full log for details. Common causes: corrupt model file, incompatible GGUF version, or insufficient resources.",
+            }
+        )
 
     return diagnoses
 

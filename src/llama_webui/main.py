@@ -110,6 +110,7 @@ def rpc_preflight(payload: RpcPreflightPayload) -> dict[str, Any]:
 async def _bg_start(config: dict[str, Any]) -> None:
     """Run manager.start in a worker thread so we don't block the event loop."""
     import asyncio
+
     loop = asyncio.get_event_loop()
     with suppress(Exception):
         await loop.run_in_executor(None, manager.start, config)
@@ -180,6 +181,7 @@ async def start_server(payload: StartPayload) -> dict[str, Any]:
         )
     # Spawn llama.cpp in background — frontend polls /api/server/status
     import asyncio
+
     asyncio.get_event_loop().create_task(_bg_start(config))
     return {"status": "starting"}
 
@@ -206,6 +208,7 @@ async def load_model(payload: ModelLoadPayload) -> dict[str, Any]:
     config = apply_model_profile(config, payload.model_path)
     config = state.save_config(config)
     import asyncio
+
     asyncio.get_event_loop().create_task(_bg_start(config))
     return {"config": config, "status": "starting"}
 
@@ -311,11 +314,13 @@ def stream_message(chat_id: int, payload: MessagePayload) -> StreamingResponse:
         return (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
 
     def event_stream() -> Iterator[bytes]:
-        yield emit({
-            "type": "start",
-            "chat_id": chat["chat_id"],
-            "user_message": user_message,
-        })
+        yield emit(
+            {
+                "type": "start",
+                "chat_id": chat["chat_id"],
+                "user_message": user_message,
+            }
+        )
         try:
             for event in manager.chat_stream(config, messages):
                 if event["type"] == "delta":
@@ -327,13 +332,15 @@ def stream_message(chat_id: int, payload: MessagePayload) -> StreamingResponse:
                 if content:
                     assistant_message = state.add_message(chat["chat_id"], "assistant", content)
                 updated_chat = state.get_chat(chat["chat_id"])
-                yield emit({
-                    "type": "done",
-                    "chat": updated_chat,
-                    "assistant_message": assistant_message,
-                    "latency_ms": event["latency_ms"],
-                    "cancelled": event["cancelled"],
-                })
+                yield emit(
+                    {
+                        "type": "done",
+                        "chat": updated_chat,
+                        "assistant_message": assistant_message,
+                        "latency_ms": event["latency_ms"],
+                        "cancelled": event["cancelled"],
+                    }
+                )
         except Exception as error:
             yield emit({"type": "error", "detail": str(error)})
 

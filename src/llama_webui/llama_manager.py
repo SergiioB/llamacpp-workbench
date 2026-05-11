@@ -31,10 +31,10 @@ class LlamaServerManager:
         if "</think>" in cleaned.lower():
             lower = cleaned.lower()
             marker = lower.rfind("</think>")
-            cleaned = cleaned[marker + len("</think>"):].strip()
+            cleaned = cleaned[marker + len("</think>") :].strip()
         cleaned = THINK_TAG_PATTERN.sub("", cleaned).strip()
         if cleaned.lower().startswith("<think>"):
-            cleaned = cleaned[len("<think>"):].strip()
+            cleaned = cleaned[len("<think>") :].strip()
         return cleaned
 
     def __init__(self, log_path: Path) -> None:
@@ -49,7 +49,9 @@ class LlamaServerManager:
     def _base_url(self, config: dict[str, Any]) -> str:
         return f"http://{config['llama_host']}:{config['llama_port']}"
 
-    def _request(self, method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 300.0) -> dict[str, Any]:
+    def _request(
+        self, method: str, url: str, payload: dict[str, Any] | None = None, timeout: float = 300.0
+    ) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         request = urllib.request.Request(
             url,
@@ -109,18 +111,29 @@ class LlamaServerManager:
         # taskset is Linux-only; skip it on Windows
         if cpu_mask and os.name != "nt":
             args.extend(["taskset", "-c", cpu_mask])
-        args.extend([
-            str(config["llama_binary"]),
-            "--host", str(config["llama_host"]),
-            "--port", str(config["llama_port"]),
-            "--model", str(config["model_path"]),
-            "--ctx-size", str(config["ctx_size"]),
-            "--threads", str(config["threads"]),
-            "--parallel", str(config["parallel"]),
-            "--n-gpu-layers", str(config["gpu_layers"]),
-            "--batch-size", str(config["batch_size"]),
-            "--ubatch-size", str(config["ubatch_size"]),
-        ])
+        args.extend(
+            [
+                str(config["llama_binary"]),
+                "--host",
+                str(config["llama_host"]),
+                "--port",
+                str(config["llama_port"]),
+                "--model",
+                str(config["model_path"]),
+                "--ctx-size",
+                str(config["ctx_size"]),
+                "--threads",
+                str(config["threads"]),
+                "--parallel",
+                str(config["parallel"]),
+                "--n-gpu-layers",
+                str(config["gpu_layers"]),
+                "--batch-size",
+                str(config["batch_size"]),
+                "--ubatch-size",
+                str(config["ubatch_size"]),
+            ]
+        )
 
         gpu_backend = str(config.get("gpu_backend") or "auto").strip()
         if gpu_backend not in ("auto", ""):
@@ -132,7 +145,9 @@ class LlamaServerManager:
             if not endpoint:
                 raise RuntimeError("RPC host and port are required")
             if not split:
-                raise RuntimeError("RPC mode requires a tensor split, for example 34,66 for the validated two-GPU profile.")
+                raise RuntimeError(
+                    "RPC mode requires a tensor split, for example 34,66 for the validated two-GPU profile."
+                )
             args.extend(["--rpc", endpoint, "--split-mode", "layer"])
             args.extend(["--tensor-split", split])
 
@@ -158,12 +173,16 @@ class LlamaServerManager:
             # Use Windows-specific process check
             try:
                 import ctypes
+
                 kernel32 = ctypes.windll.kernel32
                 handle = kernel32.OpenProcess(0x1000, False, pid)
                 if handle:
                     exit_code = ctypes.c_ulong()
                     still_active = 259
-                    if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) and exit_code.value == still_active:
+                    if (
+                        kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                        and exit_code.value == still_active
+                    ):
                         kernel32.CloseHandle(handle)
                         return pid
                     kernel32.CloseHandle(handle)
@@ -215,6 +234,7 @@ class LlamaServerManager:
             error_path = self.log_path.with_name("llama-start-error.txt")
             with open(error_path, "w", encoding="utf-8") as f:
                 import traceback
+
                 f.write(f"Error: {e}\n\n")
                 f.write(traceback.format_exc())
             with suppress(Exception):
@@ -230,6 +250,7 @@ class LlamaServerManager:
 
         # Debug: dump config being used
         import json as _json
+
         debug_path = self.log_path.with_name("llama-start-debug.txt")
         with open(debug_path, "w", encoding="utf-8") as f:
             _json.dump(config, f, indent=2, default=str)
@@ -300,7 +321,12 @@ class LlamaServerManager:
                                 pass  # Success or process already terminated
                         else:
                             os.kill(managed_pid, signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
+                    except (
+                        ProcessLookupError,
+                        PermissionError,
+                        OSError,
+                        subprocess.TimeoutExpired,
+                    ):
                         # Process already terminated or access denied, continue cleanup
                         pass
             self.process = None

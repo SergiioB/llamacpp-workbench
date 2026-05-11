@@ -14,7 +14,7 @@ from .settings import GPU_BACKEND, IS_RK3588, data_dir, resolve_llama_server_bin
 
 Q8_KV_ARGS = "--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0"
 _KV_ARG_FLAGS = {"--flash-attn", "-fa", "--cache-type-k", "-ctk", "--cache-type-v", "-ctv"}
-_LEGACY_RPC_HOST = "192.168.1.60"
+_LEGACY_RPC_HOST = "192.0.2.60"
 _LEGACY_RPC_SPLIT = "34,66"
 
 
@@ -141,24 +141,33 @@ class AppState:
                 );
                 """
             )
-            if self._conn.execute("SELECT 1 FROM app_state WHERE key = 'config'").fetchone() is None:
+            if (
+                self._conn.execute("SELECT 1 FROM app_state WHERE key = 'config'").fetchone()
+                is None
+            ):
                 self.save_config(DEFAULT_CONFIG)
             self._conn.commit()
 
     def get_config(self) -> dict[str, Any]:
         with self._lock:
-            row = self._conn.execute("SELECT value_json FROM app_state WHERE key = 'config'").fetchone()
+            row = self._conn.execute(
+                "SELECT value_json FROM app_state WHERE key = 'config'"
+            ).fetchone()
         if not row:
             return dict(DEFAULT_CONFIG)
         data = {**DEFAULT_CONFIG, **json.loads(row["value_json"])}
-        data["model_path"] = normalize_model_path(str(data.get("model_path") or ""), list_candidate_models())
+        data["model_path"] = normalize_model_path(
+            str(data.get("model_path") or ""), list_candidate_models()
+        )
         data["custom_args"] = _normalize_q8_kv_args(str(data.get("custom_args") or ""))
         _normalize_rpc_config(data)
         return data
 
     def save_config(self, config: dict[str, Any]) -> dict[str, Any]:
         merged = {**DEFAULT_CONFIG, **config}
-        merged["model_path"] = normalize_model_path(str(merged.get("model_path") or ""), list_candidate_models())
+        merged["model_path"] = normalize_model_path(
+            str(merged.get("model_path") or ""), list_candidate_models()
+        )
         merged["custom_args"] = _normalize_q8_kv_args(str(merged.get("custom_args") or ""))
         _normalize_rpc_config(merged)
         payload = json.dumps(merged, ensure_ascii=False)
@@ -202,7 +211,9 @@ class AppState:
 
     def rename_chat_if_placeholder(self, chat_id: int, first_user_message: str) -> None:
         with self._lock:
-            row = self._conn.execute("SELECT title FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
+            row = self._conn.execute(
+                "SELECT title FROM chats WHERE chat_id = ?", (chat_id,)
+            ).fetchone()
         if not row:
             return
         title = str(row["title"] or "").strip()
@@ -222,7 +233,9 @@ class AppState:
                 "INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)",
                 (chat_id, role, content),
             )
-            self._conn.execute("UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?", (chat_id,))
+            self._conn.execute(
+                "UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?", (chat_id,)
+            )
             self._conn.commit()
         return {
             "message_id": cur.lastrowid,

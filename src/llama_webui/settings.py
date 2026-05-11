@@ -31,7 +31,9 @@ def _detect_gpu_backend() -> Literal["cuda", "rocm", "metal", "cpu"]:
         return "cuda"
     if os.path.exists("/sys/kernel/mm/amd-tee"):
         return "rocm"
-    if os.uname().machine.startswith("arm64") and os.path.exists("/System/Library/Extensions/AGL.framework"):
+    if os.uname().machine.startswith("arm64") and os.path.exists(
+        "/System/Library/Extensions/AGL.framework"
+    ):
         return "metal"
     return "cpu"
 
@@ -68,11 +70,13 @@ def model_roots() -> tuple[Path, ...]:
                 for snapshot in snapshot_dir.iterdir():
                     if snapshot.is_dir():
                         fallbacks.append(snapshot)
-    fallbacks.extend([
-        PROJECT_ROOT / "models",
-        Path.home() / "models",
-        Path.home() / "llama-rpc" / "models",
-    ])
+    fallbacks.extend(
+        [
+            PROJECT_ROOT / "models",
+            Path.home() / "models",
+            Path.home() / "llama-rpc" / "models",
+        ]
+    )
     return tuple(fallbacks)
 
 

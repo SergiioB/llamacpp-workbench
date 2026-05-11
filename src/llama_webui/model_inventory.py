@@ -78,7 +78,9 @@ def _is_qwen36(model_path: str) -> bool:
 
 def _is_qwen36_moe_35b(model_path: str) -> bool:
     name = _name(model_path)
-    return _is_qwen36(model_path) and "35b" in name and "a3b" in name and not is_reap_model(model_path)
+    return (
+        _is_qwen36(model_path) and "35b" in name and "a3b" in name and not is_reap_model(model_path)
+    )
 
 
 def _is_qwen36_dense_27b(model_path: str) -> bool:
@@ -174,7 +176,7 @@ def _validation_metadata(model_path: str) -> dict[str, str]:
 def estimate_vram_gib(model_path: str) -> dict[str, Any]:
     path = Path(model_path)
     size_bytes = path.stat().st_size if path.exists() else 0
-    file_gib = size_bytes / (1024 ** 3)
+    file_gib = size_bytes / (1024**3)
     model_size = detect_model_size_billions(model_path)
     moe = is_moe_model(model_path)
     reap = is_reap_model(model_path)
@@ -206,7 +208,7 @@ def suggest_gpu_layers(model_path: str, available_vram_gib: float | None = None)
     overhead, KV cache, and transient compute buffers.
     """
     if available_vram_gib is not None:
-        file_gib = Path(model_path).stat().st_size / (1024 ** 3) if Path(model_path).exists() else 0
+        file_gib = Path(model_path).stat().st_size / (1024**3) if Path(model_path).exists() else 0
         # Leave 1.5GB for CUDA overhead, display, KV cache
         usable = available_vram_gib - 1.5
         ratio = min(1.0, usable / file_gib) if file_gib > 0 else 1.0
@@ -274,7 +276,9 @@ def _kv_cache_args(_model_path: str) -> str:
 
 
 def _reasoning_disabled_args(model_path: str) -> str:
-    return f"{_kv_cache_args(model_path)} --reasoning off --reasoning-budget 0 --reasoning-format none"
+    return (
+        f"{_kv_cache_args(model_path)} --reasoning off --reasoning-budget 0 --reasoning-format none"
+    )
 
 
 def _apply_rpc_split_default(config: dict[str, Any], split: str) -> None:
@@ -351,7 +355,13 @@ def model_sort_key(model_path: str) -> tuple[int, int, int, float, int, str]:
     qwen36_score = 1 if _is_qwen36(model_path) else 0
     a3b_score = 1 if "a3b" in name else 0
     non_reap_score = 0 if is_reap_model(model_path) else 1
-    quant_score = 2 if "ud-iq3_s" in name else 1 if "q3_k_m" in name or "q4_k_m" in name or "q4_k_xl" in name else 0
+    quant_score = (
+        2
+        if "ud-iq3_s" in name
+        else 1
+        if "q3_k_m" in name or "q4_k_m" in name or "q4_k_xl" in name
+        else 0
+    )
     return (qwen36_score, a3b_score, non_reap_score, size_score, quant_score, name)
 
 
@@ -388,7 +398,7 @@ def scan_models() -> list[dict[str, Any]]:
                 "path": model_path,
                 "name": name,
                 "size_bytes": size_bytes,
-                "size_gib": round(size_bytes / (1024 ** 3), 2),
+                "size_gib": round(size_bytes / (1024**3), 2),
                 "is_reap": "reap" in lower or "prune" in lower or "pruned" in lower,
                 "is_a3b": "a3b" in lower,
                 "is_moe": is_moe_model(model_path),
@@ -651,7 +661,9 @@ def _cuda_profile_for_model(config: dict[str, Any], _lower: str, model_path: str
     return config
 
 
-def build_model_presets(defaults: dict[str, Any], candidates: list[str] | None = None) -> list[dict[str, Any]]:
+def build_model_presets(
+    defaults: dict[str, Any], candidates: list[str] | None = None
+) -> list[dict[str, Any]]:
     available = list(candidates or list_candidate_models())
     presets: list[dict[str, Any]] = []
 
@@ -681,7 +693,9 @@ def build_model_presets(defaults: dict[str, Any], candidates: list[str] | None =
     if GPU_BACKEND == "cuda":
         seen_paths: set[str] = set()
 
-        def append_preset(match: str, label: str | None = None, description: str | None = None) -> None:
+        def append_preset(
+            match: str, label: str | None = None, description: str | None = None
+        ) -> None:
             if match in seen_paths:
                 return
             seen_paths.add(match)
