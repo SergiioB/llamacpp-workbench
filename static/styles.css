@@ -2575,3 +2575,51 @@ a { color: var(--blue); }
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* Knowledge toggle in composer */
+.knowledge-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.knowledge-toggle-btn:hover {
+  border-color: var(--border);
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.knowledge-toggle-btn.active {
+  border-color: rgba(245, 166, 35, 0.4);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* Context injection indicator */
+.context-injected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  margin: 0 20px 4px;
+  background: var(--accent-subtle);
+  border: 1px solid rgba(245, 166, 35, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--accent);
+  animation: fadeIn 0.2s var(--ease-out);
+}
+
+.context-injected i {
+  flex-shrink: 0;
+}

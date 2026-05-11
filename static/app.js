@@ -18,6 +18,7 @@ const state = {
   browserModelId: null,
   browserMode: false,
   lastGenStats: null,
+  knowledgeMode: false,
 };
 
 const markdown = window.markdownit({
@@ -1294,11 +1295,11 @@ async function stopGeneration() {
    Chat Streaming
    ═══════════════════════════════════════════════════════════════ */
 
-async function streamChatServer(chatId, content) {
+async function streamChatServer(chatId, content, knowledgeContext = null) {
   const response = await fetch(`/api/chats/${chatId}/messages/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, knowledge_context: knowledgeContext || undefined }),
   });
   if (!response.ok || !response.body) {
     throw new Error(await parseErrorResponse(response) || "stream request failed");
@@ -1446,11 +1447,32 @@ async function sendMessage() {
   state.stopRequested = false;
   setGenerating(true);
   setChatStatus("Generating…");
+
+  // Knowledge retrieval
+  let knowledgeContext = null;
+  if (state.knowledgeMode && !state.browserMode) {
+    setChatStatus("Retrieving knowledge…");
+    try {
+      const kData = await api("/api/knowledge/query", {
+        method: "POST",
+        body: JSON.stringify({ query: content, top_k: 5, use_vectors: true }),
+      });
+      if (kData.results && kData.results.length > 0) {
+        knowledgeContext = kData.results
+          .map((r, i) => `[${i + 1}] (${r.source}/${r.category}) ${r.text}`)
+          .join("\n\n");
+        showContextIndicator(kData.results.length, kData.stats?.elapsed_ms);
+      }
+    } catch (e) {
+      // Silently continue without context
+    }
+  }
+
   try {
     if (state.browserMode) {
       await streamChatBrowser(content);
     } else {
-      await streamChatServer(state.currentChatId, content);
+      await streamChatServer(state.currentChatId, content, knowledgeContext);
     }
   } catch (error) {
     const cancelledByUser = state.stopRequested;
@@ -1624,6 +1646,7 @@ document.getElementById("knowledge-search-btn").onclick = searchKnowledge;
 document.getElementById("knowledge-refresh-sources").onclick = refreshKnowledgeSources;
 document.getElementById("knowledge-embed-btn").onclick = embedKnowledge;
 document.getElementById("knowledge-clear-btn").onclick = clearKnowledge;
+document.getElementById("knowledge-toggle-btn").onclick = toggleKnowledgeMode;
 
 document.getElementById("knowledge-search-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
@@ -1984,6 +2007,31 @@ async function clearKnowledge() {
   } catch (error) {
     showToast(`Failed to clear: ${error.message}`, "error");
   }
+}
+
+function toggleKnowledgeMode() {
+  state.knowledgeMode = !state.knowledgeMode;
+  const btn = document.getElementById("knowledge-toggle-btn");
+  btn.classList.toggle("active", state.knowledgeMode);
+  if (state.knowledgeMode) {
+    showToast("Knowledge mode on — context will be injected into messages", "info", 2500);
+  }
+}
+
+function showContextIndicator(count, elapsedMs) {
+  // Remove any existing indicator
+  const existing = document.querySelector(".context-injected");
+  if (existing) existing.remove();
+
+  const indicator = document.createElement("div");
+  indicator.className = "context-injected";
+  indicator.innerHTML = `
+    <i data-lucide="brain" style="width:14px;height:14px;"></i>
+    <span>Injected ${count} passage${count !== 1 ? "s" : ""} from knowledge base${elapsedMs ? ` (${elapsedMs.toFixed(0)}ms)` : ""}</span>
+  `;
+  const messagesContainer = document.getElementById("messages");
+  messagesContainer.prepend(indicator);
+  if (window.lucide) lucide.createIcons({ nodes: [indicator] });
 }
 
 (async function init() {

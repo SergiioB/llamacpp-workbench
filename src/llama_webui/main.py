@@ -88,6 +88,7 @@ class ChatCreatePayload(BaseModel):
 
 class MessagePayload(BaseModel):
     content: str
+    knowledge_context: str | None = None
 
 
 class DownloadPayload(BaseModel):
@@ -319,6 +320,34 @@ def rename_chat(chat_id: int, payload: ChatRenamePayload) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+def _build_knowledge_context(context: str) -> str:
+    """Format retrieved passages as a system-level knowledge injection."""
+    return (
+        "[Retrieved Knowledge Context]\n"
+        "The following passages were retrieved from your knowledge base "
+        "and may be relevant to the user's query. Use them as background context "
+        "but prioritize the user's direct question.\n\n"
+        f"{context}"
+    )
+
+
+def _build_messages(
+    config: dict[str, Any],
+    full_chat: dict[str, Any],
+    knowledge_context: str | None = None,
+) -> list[dict[str, str]]:
+    """Build the message list sent to the model, with optional KB context."""
+    messages: list[dict[str, str]] = []
+    system_prompt = str(config.get("system_prompt") or "").strip()
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    if knowledge_context:
+        messages.append({"role": "system", "content": _build_knowledge_context(knowledge_context)})
+    for message in full_chat["messages"]:
+        messages.append({"role": message["role"], "content": message["content"]})
+    return messages
+
+
 @app.post("/api/chats/{chat_id}/messages")
 def send_message(chat_id: int, payload: MessagePayload) -> dict[str, Any]:
     config = state.get_config()
@@ -331,12 +360,7 @@ def send_message(chat_id: int, payload: MessagePayload) -> dict[str, Any]:
     state.rename_chat_if_placeholder(chat["chat_id"], payload.content)
 
     full_chat = state.get_chat(chat["chat_id"])
-    messages: list[dict[str, str]] = []
-    system_prompt = str(config.get("system_prompt") or "").strip()
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    for message in full_chat["messages"]:
-        messages.append({"role": message["role"], "content": message["content"]})
+    messages = _build_messages(config, full_chat, payload.knowledge_context)
 
     try:
         response = manager.chat(config, messages)
@@ -368,12 +392,7 @@ def stream_message(chat_id: int, payload: MessagePayload) -> StreamingResponse:
     state.rename_chat_if_placeholder(chat["chat_id"], payload.content)
     full_chat = state.get_chat(chat["chat_id"])
 
-    messages: list[dict[str, str]] = []
-    system_prompt = str(config.get("system_prompt") or "").strip()
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    for message in full_chat["messages"]:
-        messages.append({"role": message["role"], "content": message["content"]})
+    messages = _build_messages(config, full_chat, payload.knowledge_context)
 
     def emit(event: dict[str, Any]) -> bytes:
         return (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
