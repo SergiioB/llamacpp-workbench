@@ -382,6 +382,23 @@ function setStatus(text, ok = true) {
   status.style.color = ok ? "var(--green)" : "var(--red)";
 }
 
+function currentRpcEndpoint() {
+  const config = readConfigForm();
+  const host = String(config.rpc_host || "").trim();
+  const port = Number(config.rpc_port || 0);
+  return host && port > 0 ? `${host}:${port}` : "";
+}
+
+function clearStaleRpcStatus() {
+  const status = document.getElementById("status-text");
+  const endpoint = currentRpcEndpoint();
+  if (!status || !endpoint) return;
+  const text = status.textContent || "";
+  if (text.includes("RPC endpoint") && !text.includes(endpoint)) {
+    setStatus(`RPC ${endpoint} is reachable`);
+  }
+}
+
 function setChatStatus(text, ok = true) {
   const status = document.getElementById("chat-status-text");
   status.textContent = text;
@@ -515,6 +532,7 @@ function renderPreflight(result, statusEl, checksEl, warningsEl) {
   if (result.ready) {
     statusEl.textContent = "Ready to launch";
     statusEl.className = "preflight-status ok";
+    clearStaleRpcStatus();
   } else {
     statusEl.textContent = `${result.blocking_issues.length} blocking issue(s)`;
     statusEl.className = "preflight-status bad";
@@ -756,6 +774,10 @@ async function loadSelectedModel() {
   state.serverStarting = true;
   setStatus("Loading selected model...", true);
   try {
+    await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ config: readConfigForm() }),
+    });
     const result = await api("/api/models/load", {
       method: "POST",
       body: JSON.stringify({ model_path: modelPath }),
@@ -775,12 +797,22 @@ function selectedPreset() {
   return state.modelPresets.find((preset) => preset.id === presetId) || null;
 }
 
-function applyModelPreset() {
+async function applyModelPreset() {
   const preset = selectedPreset();
   if (!preset) return;
   writeConfigForm(preset.config, state.models.map((model) => model.path), state.modelPresets);
   renderModelLibrary();
-  setStatus(`Applied preset: ${preset.label}`);
+  try {
+    await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ config: readConfigForm() }),
+    });
+    setStatus(`Applied and saved preset: ${preset.label}`);
+    await refreshConfig();
+    await runPreflight();
+  } catch (error) {
+    setStatus(error.message, false);
+  }
 }
 
 async function loadModelPreset() {
