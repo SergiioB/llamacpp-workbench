@@ -408,36 +408,129 @@ def ingest_directory(
     return results
 
 
+# Candidate directories to scan for AI tool sessions.
+# Each entry: (source_type, relative_path_under_home, file_patterns)
+# These are NOT hardcoded results — they are scan candidates.
+# Only directories that actually exist and contain files are reported.
+_CANDIDATE_SCANS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+    ("pi", (".pi", "agent", "sessions"), ("*.jsonl", "*.json")),
+    ("claude", (".claude", "projects"), ("*.jsonl", "*.json")),
+    ("codex", (".codex", "sessions"), ("*.jsonl",)),
+    ("factory", (".factory", "sessions"), ("*.jsonl", "*.json")),
+    ("opencode", (".local", "share", "opencode"), ("*.db",)),
+    ("qwen_code", (".qwen", "projects"), ("*.jsonl", "*.json")),
+]
+
+
+def _detect_source_type(file_path: Path) -> str:
+    """Detect source type by peeking at file content.
+
+    Looks at the first JSON line to identify the session format.
+    """
+    if file_path.suffix == ".db":
+        return "opencode"
+    try:
+        with file_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                import json
+
+                data = json.loads(line)
+                line_type = str(data.get("type", ""))
+                # Codex: has "session_meta" or "response_item"
+                if line_type in ("session_meta", "response_item", "event_msg"):
+                    return "codex"
+                # Factory/DROID: has "session_start" with owner
+                if line_type == "session_start" and "owner" in data:
+                    return "factory"
+                # Pi: has "session" with version and cwd
+                if line_type == "session" and "version" in data and "cwd" in data:
+                    return "pi"
+                # Qwen Code: has uuid, sessionId, type=user/assistant
+                if "sessionId" in data and "uuid" in data:
+                    return "qwen_code"
+                # Claude Code: similar to Pi but different structure
+                if line_type == "session" and "costModel" in str(data)[:200]:
+                    return "claude"
+                break
+    except Exception:
+        pass
+    return "unknown"
+
+
 def discover_sources(_db: KnowledgeDB) -> list[dict[str, Any]]:
-    """Auto-discover known AI tool session directories."""
+    """Auto-discover AI tool session directories by scanning the filesystem.
+
+    Checks candidate directories under the user's home, counts session
+    files, and detects tool type from file content. Only returns
+    directories that actually exist and contain files.
+
+    Manually configured paths via LLAMA_WEBUI_KNOWLEDGE_SOURCES env var
+    override discovery for that source type.
+    """
     from ..settings import knowledge_source_paths
 
-    source_paths = knowledge_source_paths()
+    home = Path.home()
+    overrides = knowledge_source_paths()
     discovered: list[dict[str, Any]] = []
-    for source_name, paths in source_paths.items():
+
+    # Build scan list: overrides + candidates, overrides take precedence
+    scan_list: list[tuple[str, list[Path], tuple[str, ...]]] = []
+    seen_types: set[str] = set()
+
+    # Add env var overrides first
+    for source_name, paths in overrides.items():
+        patterns = ("*.jsonl", "*.json", "*.db")
+        scan_list.append((source_name, paths, patterns))
+        seen_types.add(source_name)
+
+    # Add candidate scans (skip if override exists for same type)
+    for source_type, rel_parts, patterns in _CANDIDATE_SCANS:
+        if source_type in seen_types:
+            continue
+        scan_list.append((source_type, [home.joinpath(*rel_parts)], patterns))
+
+    # Scan each candidate
+    for source_name, paths, patterns in scan_list:
         for base_path in paths:
-            if base_path.exists():
-                jsonl_files = list(base_path.rglob("*.jsonl"))
-                json_files = list(base_path.rglob("*.json"))
-                db_files = list(base_path.rglob("*.db"))
-                total = len(jsonl_files) + len(json_files) + len(db_files)
-                discovered.append(
-                    {
-                        "source": source_name,
-                        "path": str(base_path),
-                        "available": True,
-                        "files": total,
-                    }
-                )
-            else:
-                discovered.append(
-                    {
-                        "source": source_name,
-                        "path": str(base_path),
-                        "available": False,
-                        "files": 0,
-                    }
-                )
+            if not base_path.exists():
+                continue
+
+            total = 0
+            for pat in patterns:
+                total += len(list(base_path.rglob(pat)))
+
+            if total == 0:
+                continue
+
+            # Try to detect actual type from a sample file
+            detected_type = source_name
+            if source_name == "unknown" or source_name not in {
+                "pi",
+                "claude",
+                "codex",
+                "factory",
+                "opencode",
+                "qwen_code",
+            }:
+                # Try to auto-detect
+                for pat in patterns:
+                    sample_files = list(base_path.rglob(pat))[:1]
+                    if sample_files:
+                        detected_type = _detect_source_type(sample_files[0])
+                        break
+
+            discovered.append(
+                {
+                    "source": detected_type,
+                    "path": str(base_path),
+                    "available": True,
+                    "files": total,
+                }
+            )
+
     return discovered
 
 

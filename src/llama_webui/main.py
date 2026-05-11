@@ -512,57 +512,68 @@ def knowledge_ingest(payload: KnowledgeIngestPayload) -> dict[str, Any]:
                 }
             ]
     else:
-        from .knowledge.ingest import ingest_opencode_db
-        from .settings import knowledge_source_paths
+        from pathlib import Path
 
-        paths = knowledge_source_paths().get(payload.source, [])
-        for base_path in paths:
-            if not base_path.exists():
-                continue
-            if payload.source == "opencode":
-                # OpenCode uses SQLite, not JSONL
-                db_files = list(base_path.rglob("*.db"))
-                for db_file in db_files:
-                    if db_file.name.startswith("."):
-                        continue  # skip WAL, SHM files
-                    r = ingest_opencode_db(
-                        db_path=db_file,
-                        db=knowledge_db,
-                        embedder=embedder,
-                        chunk_size=payload.chunk_size,
-                        embed=payload.embed,
-                    )
-                    results.append(
-                        {
-                            "source": r.source,
-                            "path": r.path,
-                            "records": r.records,
-                            "chunks": r.chunks,
-                            "embedded": r.embedded,
-                            "errors": r.errors,
-                        }
-                    )
-            else:
-                ingest_results = ingest_directory(
-                    directory=base_path,
-                    source_type=payload.source,
+        from .knowledge.ingest import discover_sources, ingest_opencode_db
+
+        # Find the path for this source type via discovery
+        all_sources = discover_sources(knowledge_db)
+        source_entry = next(
+            (s for s in all_sources if s["source"] == payload.source and s["available"]),
+            None,
+        )
+        if not source_entry:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No discovered source found for '{payload.source}'. "
+                f"Available: {[s['source'] for s in all_sources if s['available']]}",
+            )
+
+        base_path = Path(source_entry["path"])
+        if payload.source == "opencode":
+            # OpenCode uses SQLite, not JSONL
+            db_files = list(base_path.rglob("*.db"))
+            for db_file in db_files:
+                if db_file.name.startswith("."):
+                    continue  # skip WAL, SHM files
+                r = ingest_opencode_db(
+                    db_path=db_file,
                     db=knowledge_db,
                     embedder=embedder,
-                    pattern=payload.pattern,
                     chunk_size=payload.chunk_size,
                     embed=payload.embed,
                 )
-                for r in ingest_results:
-                    results.append(
-                        {
-                            "source": r.source,
-                            "path": r.path,
-                            "records": r.records,
-                            "chunks": r.chunks,
-                            "embedded": r.embedded,
-                            "errors": r.errors,
-                        }
-                    )
+                results.append(
+                    {
+                        "source": r.source,
+                        "path": r.path,
+                        "records": r.records,
+                        "chunks": r.chunks,
+                        "embedded": r.embedded,
+                        "errors": r.errors,
+                    }
+                )
+        else:
+            ingest_results = ingest_directory(
+                directory=base_path,
+                source_type=payload.source,
+                db=knowledge_db,
+                embedder=embedder,
+                pattern=payload.pattern,
+                chunk_size=payload.chunk_size,
+                embed=payload.embed,
+            )
+            for r in ingest_results:
+                results.append(
+                    {
+                        "source": r.source,
+                        "path": r.path,
+                        "records": r.records,
+                        "chunks": r.chunks,
+                        "embedded": r.embedded,
+                        "errors": r.errors,
+                    }
+                )
 
     total_records = sum(r["records"] for r in results)
     total_chunks = sum(r["chunks"] for r in results)
