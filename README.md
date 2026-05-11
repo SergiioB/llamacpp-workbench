@@ -2,7 +2,7 @@
 
 # llama-webui
 
-> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, RPC split serving, and hardware-aware tuning from RK3588 boards to Windows CUDA systems.
+> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, RAG knowledge base, RPC split serving, and hardware-aware tuning from RK3588 boards to Windows CUDA systems.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -88,6 +88,8 @@ Most local-AI tools talk about ARM boards as a novelty. This repo does not.
 - Model discovery from configurable GGUF directories
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
 - `llama.cpp` RPC split mode for LAN-connected worker machines
+- **Knowledge Base / RAG**: index and search AI conversation history (Pi, Claude Code, Codex, Factory, Qwen Code) with hybrid BM25 + vector retrieval
+- Knowledge-augmented chat: inject retrieved context into model prompts with one toggle
 - RK3588-tested presets for fast daytime use and stronger overnight use
 - explicit no-thinking defaults for interactive serving, plus visible-response sanitation when models leak empty think wrappers anyway
 
@@ -123,6 +125,8 @@ llama-webui/
 │   ├── run_reap_pipeline.sh
 │   └── setup_windows.ps1
 ├── src/llama_webui/
+│   ├── knowledge/        # RAG pipeline (DB, chunker, embedder, retriever, ingest)
+│   └── ...
 └── static/
 ```
 
@@ -354,6 +358,7 @@ Supported variables:
 - `LLAMA_WEBUI_DEFAULT_DOWNLOAD_DIR`
 - `LLAMA_WEBUI_LLAMA_SERVER`
 - `LLAMA_WEBUI_LLAMA_CLI`
+- `LLAMA_WEBUI_KNOWLEDGE_SOURCES`
 
 See [.env.example](./.env.example) for concrete examples.
 
@@ -363,6 +368,7 @@ Default behavior without overrides:
 - Model search roots: `./models` and `~/models`
 - Default download target: first existing model root, otherwise `./models`
 - `llama-server` and `llama-cli`: resolved from env, then `PATH`, then common local build locations under `third_party/llama.cpp`
+- Knowledge source paths: auto-discovered from `~/.pi`, `~/.claude`, `~/.codex`, `~/.factory`, `~/.local/share/opencode`, `~/.qwen/projects`
 
 ## Building llama.cpp
 
@@ -529,8 +535,10 @@ Reason:
 | Windows-to-Windows RPC split serving | ✅ Validated |
 | RK3588-tuned presets | ✅ Production-ready |
 | Windows setup flow | ✅ Available |
-| Corpus ingestion | 🔜 Planned |
-| Retrieval/memory pages | 🔜 Planned |
+| Knowledge Base / RAG | ✅ Available |
+| Knowledge-augmented chat | ✅ Available |
+| Corpus ingestion (multi-source) | ✅ Available |
+| Retrieval / memory pages | 🔜 Planned |
 | Personalized REAP build | 🔜 Planned |
 
 ## Contributing
