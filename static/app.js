@@ -884,11 +884,18 @@ async function refreshServerStatus() {
   const indicator = document.getElementById("server-indicator");
   const isOnline = data.status.healthy;
   indicator.className = `server-status ${state.serverStarting ? "starting" : isOnline ? "online" : "offline"}`;
-  indicator.querySelector(".status-text").textContent = state.serverStarting ? "Loading" : isOnline ? "Online" : "Offline";
+  indicator.querySelector(".status-text").textContent = state.serverStarting ? "Loading" : isOnline ? "Online" : "OFF";
   if (data.config) {
     state.config = data.config;
     renderLoadedModelSummary();
   }
+
+  // Show/hide unload button
+  const unloadBtn = document.getElementById("unload-model-btn");
+  if (unloadBtn) {
+    unloadBtn.style.display = isOnline ? "flex" : "none";
+  }
+
   const serverManaged = Boolean(data.status?.managed || data.status?.pid || state.serverStarting);
   if (!isOnline && state.preflightAutoRefresh && !serverManaged) {
     runPreflight();
@@ -1609,6 +1616,14 @@ document.getElementById("apply-preset").onclick = applyPresetToComposer;
 document.getElementById("run-preset").onclick = runPreset;
 document.getElementById("init-browser").onclick = initBrowserMode;
 document.getElementById("load-browser-model").onclick = loadBrowserModel;
+
+// Unload model button
+document.getElementById("unload-model-btn").onclick = async () => {
+  const confirmed = await confirmDialog("Unload model?", "This will stop llama-server and free VRAM on all devices.");
+  if (!confirmed) return;
+  await stopServer();
+  showToast("Model unloaded — VRAM freed", "success");
+};
 
 // Settings drawer
 document.getElementById("settings-btn").onclick = openDrawer;

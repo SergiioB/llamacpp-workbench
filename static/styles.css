@@ -184,6 +184,38 @@ a { color: var(--blue); }
   color: var(--accent);
 }
 
+/* Unload Model Button */
+.unload-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 10px;
+  padding: 10px 14px;
+  width: calc(100% - 24px);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  border-radius: var(--radius-md);
+  background: var(--red-bg);
+  color: var(--red);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.unload-btn:hover {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: var(--red);
+}
+
+.unload-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* Server status indicator */
 .server-status {
   display: inline-flex;
