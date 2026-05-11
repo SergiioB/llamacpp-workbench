@@ -1794,7 +1794,7 @@ async function refreshKnowledgeStats() {
       embedStatus.textContent = data.chunks > 0 ? "All chunks embedded" : "No chunks to embed";
     }
   } catch (error) {
-    // Silent
+    console.error("[knowledge] Failed to load stats:", error);
   }
 }
 
@@ -1804,8 +1804,9 @@ async function refreshKnowledgeSources() {
     knowledgeState.sources = data.sources || [];
     renderKnowledgeSources(data.sources);
   } catch (error) {
+    console.error("[knowledge] Failed to load sources:", error);
     document.getElementById("knowledge-sources-list").innerHTML =
-      `<div class="knowledge-empty-hint">Failed to load sources.</div>`;
+      `<div class="knowledge-empty-hint">Failed to load sources: ${error.message || error}</div>`;
   }
 }
 
