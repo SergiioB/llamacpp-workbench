@@ -10,6 +10,9 @@ const state = {
   preflight: null,
   preflightAutoRefresh: true,
   serverStarting: false,
+  browserEngine: null,
+  browserModelId: null,
+  browserMode: false,
 };
 
 const markdown = window.markdownit({
@@ -179,6 +182,12 @@ function renderLoadedModelSummary() {
   const metaEl = document.getElementById("loaded-model-meta");
   if (!nameEl || !metaEl || !state.config) return;
 
+  if (state.browserMode) {
+    nameEl.textContent = state.browserModelId || "Browser model";
+    metaEl.textContent = state.browserModelId ? "WebGPU in-browser" : "WebGPU ready";
+    return;
+  }
+
   const modelPath = String(state.config.model_path || "");
   nameEl.textContent = basename(modelPath) || "No model loaded";
 
@@ -278,11 +287,15 @@ function renderMessages(chat) {
   document.getElementById("chat-title").textContent = chat.title;
   const container = document.getElementById("messages");
   container.innerHTML = "";
+  const fragment = document.createDocumentFragment();
   for (const message of chat.messages) {
     const el = createMessageElement(message.role, message.content);
-    container.appendChild(el);
+    fragment.appendChild(el);
   }
-  container.scrollTop = container.scrollHeight;
+  container.appendChild(fragment);
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
 function createMessageElement(role, content = "", options = {}) {
@@ -309,7 +322,9 @@ function appendLiveMessage(role, content = "", options = {}) {
     el.dataset.pending = "true";
   }
   container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
   return el;
 }
 
@@ -323,7 +338,34 @@ function renderMessageContent(element, content, pending = false) {
     }
     return;
   }
+  delete element.dataset.pending;
   element.innerHTML = markdown.render(safeContent);
+}
+
+let streamBuffer = "";
+let streamElement = null;
+let streamRenderScheduled = false;
+
+function streamAppendDelta(delta) {
+  streamBuffer += delta;
+  if (!streamRenderScheduled) {
+    streamRenderScheduled = true;
+    requestAnimationFrame(renderStreamBuffer);
+  }
+}
+
+function renderStreamBuffer() {
+  streamRenderScheduled = false;
+  if (!streamElement) return;
+  renderMessageContent(streamElement, streamBuffer);
+  const container = document.getElementById("messages");
+  container.scrollTop = container.scrollHeight;
+}
+
+function streamReset() {
+  streamBuffer = "";
+  streamElement = null;
+  streamRenderScheduled = false;
 }
 
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -782,6 +824,10 @@ async function stopGeneration() {
   if (!state.generating) return;
   state.stopRequested = true;
   setChatStatus("Stopping...");
+  if (state.browserMode) {
+    state.browserEngine?.interruptGenerate?.();
+    return;
+  }
   await api("/api/generation/stop", { method: "POST" });
 }
 
@@ -789,7 +835,7 @@ async function stopGeneration() {
    Chat Streaming
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-async function streamChat(chatId, content, assistantEl) {
+async function streamChatServer(chatId, content) {
   const response = await fetch(`/api/chats/${chatId}/messages/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -802,7 +848,6 @@ async function streamChat(chatId, content, assistantEl) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  const contentEl = assistantEl.querySelector("div:last-child") || assistantEl;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -816,11 +861,11 @@ async function streamChat(chatId, content, assistantEl) {
       if (rawLine) {
         const event = JSON.parse(rawLine);
         if (event.type === "delta") {
-          renderMessageContent(contentEl, event.content);
-          const container = document.getElementById("messages");
-          container.scrollTop = container.scrollHeight;
-          setChatStatus(`${event.content.length} chars`);
+          streamAppendDelta(event.delta || event.content || "");
+          setChatStatus(`Generating... ${streamBuffer.length} chars`);
         } else if (event.type === "done") {
+          renderStreamBuffer();
+          streamReset();
           await refreshChats();
           renderMessages(event.chat);
           // Handle empty response (thinking-only output sanitized to nothing)
@@ -845,6 +890,43 @@ async function streamChat(chatId, content, assistantEl) {
   }
 }
 
+async function streamChatBrowser(content) {
+  if (!state.browserEngine || !state.browserModelId) {
+    throw new Error("Load a browser model first.");
+  }
+
+  const config = state.config || {};
+  const messages = [];
+  const systemPrompt = String(config.system_prompt || "").trim();
+  if (systemPrompt) {
+    messages.push({ role: "system", content: systemPrompt });
+  }
+  messages.push({ role: "user", content });
+
+  const chunks = await state.browserEngine.chat.completions.create({
+    messages,
+    temperature: Number(config.temperature) || 1.0,
+    top_p: Number(config.top_p) || 0.95,
+    stream: true,
+  });
+
+  for await (const chunk of chunks) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    if (delta) {
+      streamAppendDelta(delta);
+      setChatStatus(`Generating... ${streamBuffer.length} chars`);
+    }
+    if (state.stopRequested) {
+      state.browserEngine?.interruptGenerate?.();
+      break;
+    }
+  }
+
+  renderStreamBuffer();
+  streamReset();
+  setChatStatus(state.stopRequested ? "Stopped" : "Done in browser");
+}
+
 async function sendMessage() {
   const input = document.getElementById("message-input");
   if (state.generating) {
@@ -855,25 +937,33 @@ async function sendMessage() {
   const content = input.value.trim();
   if (!content) return;
   const indicator = document.getElementById("server-indicator");
-  if (!indicator.classList.contains("online")) {
+  if (!state.browserMode && !indicator.classList.contains("online")) {
     setChatStatus("Server is offline â€” start llama.cpp first", false);
     return;
   }
-  if (!state.currentChatId) {
+  if (!state.browserMode && !state.currentChatId) {
     await createChat();
   }
 
   appendLiveMessage("user", content);
   const assistantEl = appendLiveMessage("assistant", "", { pending: true });
+  streamReset();
+  streamElement = assistantEl.querySelector("div:last-child") || assistantEl;
   input.value = "";
   autoResizeTextarea(input);
   state.stopRequested = false;
   setGenerating(true);
   setChatStatus("Generating...");
   try {
-    await streamChat(state.currentChatId, content, assistantEl);
+    if (state.browserMode) {
+      await streamChatBrowser(content);
+    } else {
+      await streamChatServer(state.currentChatId, content);
+    }
   } catch (error) {
     const cancelledByUser = state.stopRequested;
+    renderStreamBuffer();
+    streamReset();
     if (!cancelledByUser) {
       const contentEl = assistantEl.querySelector("div:last-child") || assistantEl;
       contentEl.innerHTML = `<p style="color: var(--red);">${error.message}</p>`;
@@ -903,6 +993,102 @@ async function runPreset() {
    Auto-resize textarea
    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
+const BROWSER_MODELS = [
+  { id: "SmolLM2-135M-Instruct-q4f16_1-MLC", label: "SmolLM2 135M", size: "~100 MB" },
+  { id: "SmolLM2-360M-Instruct-q4f16_1-MLC", label: "SmolLM2 360M", size: "~220 MB" },
+  { id: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B", size: "~700 MB" },
+  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen2.5 1.5B", size: "~1 GB" },
+  { id: "gemma-2-2b-it-q4f16_1-MLC", label: "Gemma 2 2B", size: "~1.4 GB" },
+  { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B", size: "~1.8 GB" },
+  { id: "Qwen2.5-3B-Instruct-q4f16_1-MLC", label: "Qwen2.5 3B", size: "~1.8 GB" },
+  { id: "Phi-3.5-mini-instruct-q4f16_1-MLC", label: "Phi 3.5 Mini", size: "~2.3 GB" },
+];
+
+function detectWebGPU() {
+  return Boolean(navigator.gpu);
+}
+
+function populateBrowserModels() {
+  const select = document.getElementById("browser-model-select");
+  if (!select) return;
+  select.innerHTML = '<option value="">Choose a browser model...</option>';
+  for (const model of BROWSER_MODELS) {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = `${model.label} (${model.size})`;
+    select.appendChild(option);
+  }
+}
+
+function setBrowserStatus(text, ok = true) {
+  const status = document.getElementById("browser-status");
+  const badge = document.getElementById("browser-mode-badge");
+  if (status) {
+    status.textContent = text;
+    status.className = `browser-status ${ok ? "ok" : "bad"}`;
+  }
+  if (badge) {
+    badge.textContent = ok ? "Available" : "Unavailable";
+    badge.className = `health-badge ${ok ? "ok" : "bad"}`;
+  }
+}
+
+function setBrowserControlsEnabled(enabled) {
+  const select = document.getElementById("browser-model-select");
+  const load = document.getElementById("load-browser-model");
+  if (select) select.disabled = !enabled;
+  if (load) load.disabled = !enabled;
+}
+
+async function initBrowserMode() {
+  if (!detectWebGPU()) {
+    setBrowserStatus("WebGPU is not available in this browser.", false);
+    return;
+  }
+
+  setBrowserStatus("Loading WebLLM engine...");
+  try {
+    const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+    state.browserEngine = new webllm.MLCEngine({
+      initProgressCallback: (progress) => {
+        const pct = Number.isFinite(progress.progress) ? ` ${Math.round(progress.progress * 100)}%` : "";
+        setBrowserStatus(progress.text || `Preparing WebLLM${pct}`);
+      },
+    });
+    state.browserMode = true;
+    populateBrowserModels();
+    setBrowserControlsEnabled(true);
+    setBrowserStatus("WebLLM ready. Choose a model to load.");
+    document.getElementById("browser-section")?.classList.add("active");
+    renderLoadedModelSummary();
+  } catch (error) {
+    state.browserMode = false;
+    setBrowserControlsEnabled(false);
+    setBrowserStatus(`WebLLM failed to load: ${error.message}`, false);
+  }
+}
+
+async function loadBrowserModel() {
+  const select = document.getElementById("browser-model-select");
+  const modelId = select?.value || "";
+  if (!modelId || !state.browserEngine) return;
+
+  setGenerating(true);
+  setBrowserStatus(`Loading ${modelId}...`);
+  try {
+    await state.browserEngine.reload(modelId);
+    state.browserModelId = modelId;
+    state.browserMode = true;
+    setBrowserStatus(`Loaded ${modelId}`);
+    setStatus(`Browser model loaded: ${modelId}`);
+    renderLoadedModelSummary();
+  } catch (error) {
+    setBrowserStatus(`Model load failed: ${error.message}`, false);
+  } finally {
+    setGenerating(false);
+  }
+}
+
 function autoResizeTextarea(textarea) {
   textarea.style.height = "auto";
   const maxHeight = 200;
@@ -927,6 +1113,8 @@ document.getElementById("start-download").onclick = startDownload;
 document.getElementById("send-message").onclick = sendMessage;
 document.getElementById("apply-preset").onclick = applyPresetToComposer;
 document.getElementById("run-preset").onclick = runPreset;
+document.getElementById("init-browser").onclick = initBrowserMode;
+document.getElementById("load-browser-model").onclick = loadBrowserModel;
 
 // Settings drawer
 document.getElementById("settings-btn").onclick = openDrawer;
@@ -984,6 +1172,12 @@ document.addEventListener("keydown", (e) => {
   }
 
   loadPromptPresets();
+  if (detectWebGPU()) {
+    populateBrowserModels();
+    setBrowserStatus("WebGPU available. Enable Browser Inference to load WebLLM.");
+  } else {
+    setBrowserStatus("WebGPU is not available in this browser.", false);
+  }
   await refreshConfig();
   await refreshModels();
   await refreshChats();

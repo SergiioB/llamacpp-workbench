@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=browser-rpc-20260511" />
   </head>
   <body>
     <div class="app-shell">
@@ -212,6 +212,30 @@
                     <strong>RPC Split</strong>
                     <span>Offloads layers to a remote rpc-server endpoint.</span>
                   </div>
+                </div>
+
+                <div id="browser-section" class="browser-section">
+                  <div class="browser-header">
+                    <div>
+                      <div class="browser-title">Browser Inference</div>
+                      <div class="browser-subtitle">Run a small WebLLM model locally through WebGPU without starting llama-server.</div>
+                    </div>
+                    <span id="browser-mode-badge" class="health-badge neutral">WebGPU check pending</span>
+                  </div>
+                  <div class="browser-controls">
+                    <button id="init-browser" type="button" class="btn btn-secondary btn-sm">
+                      <i data-lucide="monitor-up" class="icon-xs"></i>
+                      Enable
+                    </button>
+                    <select id="browser-model-select" disabled>
+                      <option value="">Choose a browser model...</option>
+                    </select>
+                    <button id="load-browser-model" type="button" class="btn btn-primary btn-sm" disabled>
+                      <i data-lucide="download" class="icon-xs"></i>
+                      Load
+                    </button>
+                  </div>
+                  <div id="browser-status" class="browser-status">Waiting for WebGPU capability check.</div>
                 </div>
 
                 <!-- RPC Config (shown when RPC mode selected) -->
@@ -445,6 +469,6 @@
     </div>
 
     <script src="/static/vendor/markdown-it.min.js"></script>
-    <script src="/static/app.js?v=rpc-readiness-20260427"></script>
+    <script src="/static/app.js?v=browser-rpc-20260511"></script>
   </body>
 </html>
