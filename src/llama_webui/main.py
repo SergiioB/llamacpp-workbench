@@ -512,11 +512,37 @@ def knowledge_ingest(payload: KnowledgeIngestPayload) -> dict[str, Any]:
                 }
             ]
     else:
+        from .knowledge.ingest import ingest_opencode_db
         from .settings import knowledge_source_paths
 
         paths = knowledge_source_paths().get(payload.source, [])
         for base_path in paths:
-            if base_path.exists():
+            if not base_path.exists():
+                continue
+            if payload.source == "opencode":
+                # OpenCode uses SQLite, not JSONL
+                db_files = list(base_path.rglob("*.db"))
+                for db_file in db_files:
+                    if db_file.name.startswith("."):
+                        continue  # skip WAL, SHM files
+                    r = ingest_opencode_db(
+                        db_path=db_file,
+                        db=knowledge_db,
+                        embedder=embedder,
+                        chunk_size=payload.chunk_size,
+                        embed=payload.embed,
+                    )
+                    results.append(
+                        {
+                            "source": r.source,
+                            "path": r.path,
+                            "records": r.records,
+                            "chunks": r.chunks,
+                            "embedded": r.embedded,
+                            "errors": r.errors,
+                        }
+                    )
+            else:
                 ingest_results = ingest_directory(
                     directory=base_path,
                     source_type=payload.source,

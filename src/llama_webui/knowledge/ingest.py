@@ -419,7 +419,8 @@ def discover_sources(_db: KnowledgeDB) -> list[dict[str, Any]]:
             if base_path.exists():
                 jsonl_files = list(base_path.rglob("*.jsonl"))
                 json_files = list(base_path.rglob("*.json"))
-                total = len(jsonl_files) + len(json_files)
+                db_files = list(base_path.rglob("*.db"))
+                total = len(jsonl_files) + len(json_files) + len(db_files)
                 discovered.append(
                     {
                         "source": source_name,
@@ -438,3 +439,130 @@ def discover_sources(_db: KnowledgeDB) -> list[dict[str, Any]]:
                     }
                 )
     return discovered
+
+
+def ingest_opencode_db(
+    db_path: Path,
+    db: KnowledgeDB,
+    embedder: Embedder,
+    chunk_size: int = 512,
+    embed: bool = True,
+) -> IngestResult:
+    """Ingest conversations from an OpenCode SQLite database.
+
+    OpenCode stores sessions in SQLite with session/message/part tables.
+    """
+    result = IngestResult(source="opencode", path=str(db_path))
+    if not db_path.exists():
+        result.errors.append("Database file not found")
+        return result
+
+    import sqlite3 as sqlite3_mod
+
+    file_hash = _file_hash(db_path)
+    file_size = db_path.stat().st_size
+
+    source_id = db.insert_source(
+        str(db_path),
+        "opencode",
+        file_hash,
+        file_size,
+        metadata={"type": "sqlite"},
+    )
+    if db.source_exists_with_hash(source_id, file_hash):
+        return result
+
+    try:
+        src_conn = sqlite3_mod.connect(str(db_path))
+        sessions = src_conn.execute("SELECT id, title FROM session").fetchall()
+    except Exception as e:
+        result.errors.append(f"Failed to read OpenCode DB: {e}")
+        return result
+    finally:
+        src_conn.close()
+
+    src_conn = sqlite3_mod.connect(str(db_path), check_same_thread=False)
+    try:
+        for session_id, session_title in sessions:
+            # Get messages with their text parts
+            rows = src_conn.execute(
+                """SELECT m.id, COALESCE(json_extract(m.data, '$.role'), 'unknown'),
+                          GROUP_CONCAT(
+                            CASE WHEN json_extract(p.data, '$.type') = 'text'
+                                 THEN json_extract(p.data, '$.text') END, '\n'
+                          )
+                   FROM message m
+                   LEFT JOIN part p ON p.message_id = m.id
+                   WHERE m.session_id = ?
+                   GROUP BY m.id
+                   ORDER BY m.time_created""",
+                (session_id,),
+            ).fetchall()
+
+            messages: list[dict[str, str]] = []
+            for _msg_id, role, text in rows:
+                if not text or not text.strip():
+                    continue
+                if role not in ("user", "assistant"):
+                    continue
+                messages.append({"role": role, "content": text.strip()})
+
+            if not messages:
+                continue
+
+            conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+            if len(conversation_text.strip()) < 50:
+                continue
+
+            category = "chat"
+            lower = conversation_text.lower()
+            if any(kw in lower for kw in ["def ", "class ", "import ", "```"]):
+                category = "code"
+            elif any(kw in lower for kw in ["tool", "execute", "script"]):
+                category = "tool"
+
+            importance = 0.5
+            if category == "code":
+                importance = 0.7
+            elif category == "tool":
+                importance = 0.6
+            if len(conversation_text) > 1000:
+                importance += 0.1
+
+            record_id = db.insert_record(
+                source_id=source_id,
+                external_id=session_id,
+                title=session_title or "OpenCode Session",
+                record_type="conversation",
+                category=category,
+                importance=min(importance, 1.0),
+                metadata={"message_count": len(messages)},
+            )
+            result.records += 1
+
+            chunks = chunk_text(
+                conversation_text,
+                source_type="opencode",
+                strategy="auto",
+                chunk_size=chunk_size,
+            )
+            for chunk in chunks:
+                db.insert_chunk(
+                    record_id=record_id,
+                    chunk_index=chunk.index,
+                    text=chunk.text,
+                    chunk_hash=chunk.hash,
+                    strategy=chunk.strategy,
+                    metadata=chunk.metadata,
+                )
+                result.chunks += 1
+    finally:
+        src_conn.close()
+
+    db.update_source_counts(source_id, result.records, result.chunks)
+
+    if embed and result.chunks > 0 and embedder.is_available():
+        embed_stats = embed_chunks_for_db(db, embedder, batch_size=32)
+        result.embedded = embed_stats["embedded"]
+
+    return result

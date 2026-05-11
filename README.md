@@ -88,7 +88,7 @@ Most local-AI tools talk about ARM boards as a novelty. This repo does not.
 - Model discovery from configurable GGUF directories
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
 - `llama.cpp` RPC split mode for LAN-connected worker machines
-- **Knowledge Base / RAG**: index and search AI conversation history (Pi, Claude Code, Codex, Factory, Qwen Code) with hybrid BM25 + vector retrieval
+- **Knowledge Base / RAG**: index and search AI conversation history (Pi, Claude Code, Codex, Factory, Qwen Code, OpenCode) with hybrid BM25 + vector retrieval
 - Knowledge-augmented chat: inject retrieved context into model prompts with one toggle
 - RK3588-tested presets for fast daytime use and stronger overnight use
 - explicit no-thinking defaults for interactive serving, plus visible-response sanitation when models leak empty think wrappers anyway
