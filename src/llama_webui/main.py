@@ -512,11 +512,9 @@ def knowledge_ingest(payload: KnowledgeIngestPayload) -> dict[str, Any]:
                 }
             ]
     else:
-        from pathlib import Path
+        from .settings import knowledge_source_paths
 
-        from .knowledge.ingest import SOURCE_PATHS
-
-        paths = SOURCE_PATHS.get(payload.source, [])
+        paths = knowledge_source_paths().get(payload.source, [])
         for base_path in paths:
             if base_path.exists():
                 ingest_results = ingest_directory(

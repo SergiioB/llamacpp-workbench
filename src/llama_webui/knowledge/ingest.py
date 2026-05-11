@@ -15,16 +15,6 @@ from .embedder import Embedder, embed_chunks_for_db
 
 logger = logging.getLogger(__name__)
 
-# Source-specific discovery paths
-SOURCE_PATHS: dict[str, list[Path]] = {
-    "pi": [Path.home() / ".pi" / "agent" / "sessions"],
-    "claude": [Path.home() / ".claude" / "projects"],
-    "codex": [Path.home() / ".codex" / "sessions"],
-    "factory": [Path.home() / ".factory" / "sessions"],
-    "opencode": [Path.home() / ".local" / "share" / "opencode"],
-    "qwen_code": [Path.home() / ".qwen" / "projects"],
-}
-
 
 @dataclass
 class IngestResult:
@@ -278,6 +268,19 @@ def ingest_jsonl(
     if file_size < 100:
         return result
 
+    # Skip if this exact file was already ingested (same path + hash)
+    source_id = db.insert_source(
+        str(path),
+        source_type,
+        file_hash,
+        file_size,
+        metadata={"type": "jsonl", "format": "event_stream"},
+    )
+    # insert_source returns existing ID if path matches, but hash may differ.
+    # If hash matches, the file content hasn't changed — skip re-ingest.
+    if db.source_exists_with_hash(source_id, file_hash):
+        return result
+
     # Read and parse all lines
     lines: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -330,14 +333,6 @@ def ingest_jsonl(
     if len(conversation_messages) > 10:
         importance += 0.1
 
-    source_id = db.insert_source(
-        str(path),
-        source_type,
-        file_hash,
-        file_size,
-        metadata={"type": "jsonl", "format": "event_stream"},
-    )
-
     external_id = _extract_session_id(lines) or path.stem
 
     record_id = db.insert_record(
@@ -370,6 +365,9 @@ def ingest_jsonl(
             metadata=chunk.metadata,
         )
         result.chunks += 1
+
+    # Update source with actual chunk count
+    db.update_source_counts(source_id, result.records, result.chunks)
 
     if embed and result.chunks > 0 and embedder.is_available():
         embed_stats = embed_chunks_for_db(db, embedder, batch_size=32)
@@ -412,8 +410,11 @@ def ingest_directory(
 
 def discover_sources(_db: KnowledgeDB) -> list[dict[str, Any]]:
     """Auto-discover known AI tool session directories."""
+    from ..settings import knowledge_source_paths
+
+    source_paths = knowledge_source_paths()
     discovered: list[dict[str, Any]] = []
-    for source_name, paths in SOURCE_PATHS.items():
+    for source_name, paths in source_paths.items():
         for base_path in paths:
             if base_path.exists():
                 jsonl_files = list(base_path.rglob("*.jsonl"))

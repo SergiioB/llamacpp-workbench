@@ -176,6 +176,36 @@ class KnowledgeDB:
             finally:
                 conn.close()
 
+    def source_exists_with_hash(self, source_id: int, file_hash: str) -> bool:
+        """Check if a source already has this exact hash (unchanged file)."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT file_hash, chunk_count FROM knowledge_sources WHERE id = ?",
+                    (source_id,),
+                ).fetchone()
+                return bool(row and row[0] == file_hash and (row[1] or 0) > 0)
+            finally:
+                conn.close()
+
+    def update_source_counts(self, source_id: int, record_count: int, chunk_count: int) -> None:
+        """Update ingestion counts and timestamp on a source."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """UPDATE knowledge_sources
+                       SET record_count = ?, chunk_count = ?,
+                           last_ingested_at = CURRENT_TIMESTAMP,
+                           ingestion_status = 'completed'
+                       WHERE id = ?""",
+                    (record_count, chunk_count, source_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     def insert_record(
         self,
         source_id: int,

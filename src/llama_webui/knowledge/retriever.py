@@ -127,7 +127,7 @@ def tokenize(text: str) -> list[str]:
 
 
 def build_fts_query(query: str) -> str:
-    tokens = tokenize(query)
+    tokens = list(dict.fromkeys(tokenize(query)))  # deduplicate preserving order
     if not tokens:
         return ""
     return " OR ".join(tokens)

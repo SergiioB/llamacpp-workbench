@@ -78,6 +78,4 @@ def embed_chunks_for_db(
                 embedded += 1
             else:
                 failed += 1
-        if not pending:
-            break
     return {"embedded": embedded, "failed": failed}
