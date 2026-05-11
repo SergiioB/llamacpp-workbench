@@ -180,6 +180,9 @@ Open `http://<host>:8095`.
 
 ## llama.cpp RPC Mode
 
+For the exact Windows-to-Windows launch checklist and PowerShell helpers, use
+[docs/rpc-remote-host-runbook.md](./docs/rpc-remote-host-runbook.md).
+
 The WebUI can start `llama-server` either on one machine or with llama.cpp RPC
 offload to another reachable device. In this mode there are two roles:
 
@@ -239,7 +242,7 @@ internal transport, not an authenticated public API.
 Open Settings in the WebUI and set:
 
 - `Runtime -> Mode`: `RPC Split`
-- `RPC Host`: the worker IP or DNS name, for example `192.168.1.60`
+- `RPC Host`: the worker IP or DNS name, for example `192.168.1.146`
 - `Port`: the worker port, for example `50052`
 - `Tensor Split`: a comma-separated model-weight ratio, for example `34,66`
 
