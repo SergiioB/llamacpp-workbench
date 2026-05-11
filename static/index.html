@@ -4,11 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>llama-webui</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='10' y='10' width='80' height='80' rx='16' fill='%230a0a0b' stroke='%23585b60' stroke-width='3'/><text x='50' y='68' font-family='monospace' font-size='48' font-weight='bold' fill='%23f5a623' text-anchor='middle'>ll</text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=browser-rpc-ux-20260511" />
+    <link rel="stylesheet" href="/static/styles.css?v=ux-v2-20260511" />
   </head>
   <body>
     <div class="app-shell">
@@ -16,14 +17,34 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div class="sidebar-brand">
-            <span class="brand-icon">🦙</span>
+            <span class="brand-mark">ll</span>
             <span class="brand-text">llama-webui</span>
           </div>
           <div class="sidebar-controls">
             <span id="server-indicator" class="server-status offline">
               <span class="status-dot"></span>
-              <span class="status-text">Offline</span>
+              <span class="status-text">OFF</span>
             </span>
+          </div>
+        </div>
+
+        <!-- System Metrics Strip -->
+        <div class="sidebar-metrics" id="sidebar-metrics">
+          <div class="metric" id="metric-model">
+            <span class="metric-label">MODEL</span>
+            <span class="metric-value" id="metric-model-value">—</span>
+          </div>
+          <div class="metric" id="metric-backend">
+            <span class="metric-label">RUNTIME</span>
+            <span class="metric-value" id="metric-backend-value">cpu</span>
+          </div>
+          <div class="metric" id="metric-ctx">
+            <span class="metric-label">CTX</span>
+            <span class="metric-value" id="metric-ctx-value">—</span>
+          </div>
+          <div class="metric" id="metric-layers">
+            <span class="metric-label">GPU</span>
+            <span class="metric-value" id="metric-layers-value">0</span>
           </div>
         </div>
 
@@ -37,8 +58,13 @@
         <div id="chat-list" class="chat-list"></div>
 
         <div class="sidebar-footer">
+          <div class="sidebar-footer-stats">
+            <span id="sidebar-chat-count">0 chats</span>
+            <span>·</span>
+            <span id="sidebar-model-count">0 models</span>
+          </div>
           <button id="open-settings-btn" class="sidebar-footer-btn">
-            <i data-lucide="settings" class="icon-sm"></i>
+            <i data-lucide="terminal" class="icon-sm"></i>
             Settings
           </button>
         </div>
@@ -56,7 +82,7 @@
               <div>
                 <div id="chat-title" class="chat-title">New Chat</div>
                 <div class="chat-model-strip">
-                  <span id="loaded-model-name" class="model-badge">No model loaded</span>
+                  <span id="loaded-model-name" class="model-badge unloaded">No model loaded</span>
                   <span id="loaded-model-meta" class="model-meta"></span>
                 </div>
               </div>
@@ -68,8 +94,46 @@
             </div>
           </div>
 
+          <!-- Empty State -->
+          <div id="empty-state" class="empty-state">
+            <div class="empty-logo">
+              <span class="brand-mark" style="width:56px;height:56px;font-size:28px;border-radius:12px;">ll</span>
+            </div>
+            <div class="empty-title">llama-webui</div>
+            <div class="empty-subtitle">
+              Direct llama.cpp control with persistent chats, hardware-aware tuning, and model management.
+              No Ollama layer.
+            </div>
+            <div class="empty-shortcuts" id="empty-shortcuts">
+              <div class="shortcut-chip" data-action="settings">
+                <i data-lucide="settings" class="icon-sm"></i>
+                Load a model
+              </div>
+              <div class="shortcut-chip" data-action="preset-latency">
+                <i data-lucide="zap" class="icon-sm"></i>
+                Latency smoke test
+              </div>
+              <div class="shortcut-chip" data-action="preset-code">
+                <i data-lucide="code-2" class="icon-sm"></i>
+                Coding check
+              </div>
+              <div class="shortcut-chip" data-action="preset-reason">
+                <i data-lucide="brain" class="icon-sm"></i>
+                Reasoning probe
+              </div>
+            </div>
+            <div class="empty-hint">
+              Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to send a message
+            </div>
+          </div>
+
           <!-- Messages -->
-          <div id="messages" class="messages"></div>
+          <div id="messages" class="messages hidden"></div>
+
+          <!-- Scroll-to-Bottom -->
+          <button id="scroll-bottom" class="scroll-bottom-btn" title="Scroll to bottom">
+            <i data-lucide="chevron-down" class="icon-md"></i>
+          </button>
 
           <!-- Composer -->
           <div class="composer-wrapper">
@@ -86,7 +150,7 @@
                   <button id="apply-preset" class="text-btn" title="Insert preset into composer">Insert</button>
                   <button id="run-preset" class="text-btn" title="Insert and send preset">Run</button>
                 </div>
-                <span class="composer-hint">Ctrl+Enter to send</span>
+                <span class="composer-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
                 <span id="chat-status-text" class="chat-status"></span>
               </div>
             </div>
@@ -256,7 +320,7 @@
                   <div class="field-grid">
                     <div class="field span-2">
                       <label for="rpc_host">RPC Host</label>
-                      <input id="rpc_host" placeholder="remote-host.local or 192.168.1.50" />
+                      <input id="rpc_host" placeholder="rpc-worker.local or 192.0.2.20" />
                     </div>
                     <div class="field">
                       <label for="rpc_port">Port</label>
@@ -468,7 +532,10 @@
       </main>
     </div>
 
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <script src="/static/vendor/markdown-it.min.js"></script>
-    <script src="/static/app.js?v=browser-rpc-ux-20260511"></script>
+    <script src="/static/app.js?v=ux-v2-20260511"></script>
   </body>
 </html>
