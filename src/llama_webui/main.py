@@ -16,6 +16,10 @@ from starlette.responses import Response
 
 from .app_state import AppState
 from .download_manager import ModelDownloadManager
+from .knowledge.db import KnowledgeDB
+from .knowledge.embedder import Embedder, embed_chunks_for_db
+from .knowledge.ingest import discover_sources, ingest_directory, ingest_jsonl
+from .knowledge.retriever import retrieve
 from .llama_manager import LlamaServerManager
 from .model_inventory import (
     apply_model_profile,
@@ -29,6 +33,15 @@ from .settings import PROJECT_ROOT, STATIC_DIR, data_dir, default_download_dir
 state = AppState(PROJECT_ROOT)
 manager = LlamaServerManager(state.log_path)
 downloads = ModelDownloadManager(data_dir() / "downloads", default_download_dir())
+knowledge_db = KnowledgeDB(data_dir() / "knowledge.db")
+
+
+def _embedder_from_config(config: dict[str, Any]) -> Embedder:
+    return Embedder(
+        host=str(config.get("llama_host") or "127.0.0.1"),
+        port=int(config.get("llama_port") or 8085),
+    )
+
 
 app = FastAPI(title="llama-webui")
 
@@ -84,6 +97,24 @@ class DownloadPayload(BaseModel):
 
 class ModelLoadPayload(BaseModel):
     model_path: str
+
+
+class KnowledgeQueryPayload(BaseModel):
+    query: str
+    top_k: int = 10
+    use_vectors: bool = True
+
+
+class KnowledgeIngestPayload(BaseModel):
+    source: str = "pi"
+    path: str | None = None
+    pattern: str = "*.jsonl"
+    chunk_size: int = 512
+    embed: bool = True
+
+
+class KnowledgeEmbedPayload(BaseModel):
+    batch_size: int = 32
 
 
 @app.get("/")
@@ -379,6 +410,150 @@ def stream_message(chat_id: int, payload: MessagePayload) -> StreamingResponse:
             yield emit({"type": "error", "detail": str(error)})
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
+# ── Knowledge Base API ──────────────────────────────────────────
+
+
+@app.get("/api/knowledge/stats")
+def knowledge_stats() -> dict[str, Any]:
+    return knowledge_db.stats()
+
+
+@app.get("/api/knowledge/sources")
+def knowledge_sources() -> dict[str, Any]:
+    return {"sources": discover_sources(knowledge_db)}
+
+
+@app.post("/api/knowledge/query")
+def knowledge_query(payload: KnowledgeQueryPayload) -> dict[str, Any]:
+    config = state.get_config()
+    embedder = _embedder_from_config(config)
+    results, search_stats = retrieve(
+        query=payload.query,
+        db=knowledge_db,
+        embedder=embedder,
+        top_k=payload.top_k,
+        use_vectors=payload.use_vectors,
+    )
+    return {
+        "results": [r.to_dict() for r in results],
+        "stats": search_stats,
+    }
+
+
+@app.post("/api/knowledge/ingest")
+def knowledge_ingest(payload: KnowledgeIngestPayload) -> dict[str, Any]:
+    config = state.get_config()
+    embedder = _embedder_from_config(config)
+    results: list[dict[str, Any]] = []
+
+    if payload.path:
+        from pathlib import Path
+
+        path = Path(payload.path).expanduser()
+        if path.is_dir():
+            ingest_results = ingest_directory(
+                directory=path,
+                source_type=payload.source,
+                db=knowledge_db,
+                embedder=embedder,
+                pattern=payload.pattern,
+                chunk_size=payload.chunk_size,
+                embed=payload.embed,
+            )
+            results = [
+                {
+                    "source": r.source,
+                    "path": r.path,
+                    "records": r.records,
+                    "chunks": r.chunks,
+                    "embedded": r.embedded,
+                    "errors": r.errors,
+                }
+                for r in ingest_results
+            ]
+        else:
+            result = ingest_jsonl(
+                path=path,
+                source_type=payload.source,
+                db=knowledge_db,
+                embedder=embedder,
+                chunk_size=payload.chunk_size,
+                embed=payload.embed,
+            )
+            results = [
+                {
+                    "source": result.source,
+                    "path": result.path,
+                    "records": result.records,
+                    "chunks": result.chunks,
+                    "embedded": result.embedded,
+                    "errors": result.errors,
+                }
+            ]
+    else:
+        from pathlib import Path
+
+        from .knowledge.ingest import SOURCE_PATHS
+
+        paths = SOURCE_PATHS.get(payload.source, [])
+        for base_path in paths:
+            if base_path.exists():
+                ingest_results = ingest_directory(
+                    directory=base_path,
+                    source_type=payload.source,
+                    db=knowledge_db,
+                    embedder=embedder,
+                    pattern=payload.pattern,
+                    chunk_size=payload.chunk_size,
+                    embed=payload.embed,
+                )
+                for r in ingest_results:
+                    results.append(
+                        {
+                            "source": r.source,
+                            "path": r.path,
+                            "records": r.records,
+                            "chunks": r.chunks,
+                            "embedded": r.embedded,
+                            "errors": r.errors,
+                        }
+                    )
+
+    total_records = sum(r["records"] for r in results)
+    total_chunks = sum(r["chunks"] for r in results)
+    total_embedded = sum(r["embedded"] for r in results)
+    all_errors = [e for r in results for e in r.get("errors", [])]
+
+    return {
+        "results": results,
+        "summary": {
+            "total_records": total_records,
+            "total_chunks": total_chunks,
+            "total_embedded": total_embedded,
+            "errors": all_errors,
+        },
+    }
+
+
+@app.post("/api/knowledge/embed")
+def knowledge_embed(payload: KnowledgeEmbedPayload) -> dict[str, Any]:
+    config = state.get_config()
+    embedder = _embedder_from_config(config)
+    if not embedder.is_available():
+        raise HTTPException(
+            status_code=409,
+            detail="llama-server is not running — start it first to generate embeddings",
+        )
+    stats = embed_chunks_for_db(knowledge_db, embedder, batch_size=payload.batch_size)
+    return stats
+
+
+@app.delete("/api/knowledge")
+def knowledge_clear() -> dict[str, Any]:
+    knowledge_db.clear_all()
+    return {"cleared": True}
 
 
 def run() -> None:

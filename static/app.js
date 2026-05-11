@@ -1617,6 +1617,21 @@ document.getElementById("run-preset").onclick = runPreset;
 document.getElementById("init-browser").onclick = initBrowserMode;
 document.getElementById("load-browser-model").onclick = loadBrowserModel;
 
+// Knowledge panel
+document.getElementById("knowledge-tab-btn").onclick = toggleKnowledgePanel;
+document.getElementById("knowledge-back-btn").onclick = hideKnowledgePanel;
+document.getElementById("knowledge-search-btn").onclick = searchKnowledge;
+document.getElementById("knowledge-refresh-sources").onclick = refreshKnowledgeSources;
+document.getElementById("knowledge-embed-btn").onclick = embedKnowledge;
+document.getElementById("knowledge-clear-btn").onclick = clearKnowledge;
+
+document.getElementById("knowledge-search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    searchKnowledge();
+  }
+});
+
 // Unload model button
 document.getElementById("unload-model-btn").onclick = async () => {
   const confirmed = await confirmDialog("Unload model?", "This will stop llama-server and free VRAM on all devices.");
@@ -1662,10 +1677,14 @@ document.getElementById("message-input").addEventListener("input", function () {
   autoResizeTextarea(this);
 });
 
-// Escape to close drawer
+// Escape to close drawer or knowledge panel
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    closeDrawer();
+    if (knowledgeState.active) {
+      hideKnowledgePanel();
+    } else {
+      closeDrawer();
+    }
     document.getElementById("sidebar").classList.remove("open");
   }
 });
@@ -1697,8 +1716,275 @@ document.getElementById("empty-shortcuts").addEventListener("click", (e) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   Initialize
+   Knowledge Base
    ═══════════════════════════════════════════════════════════════ */
+
+const knowledgeState = {
+  active: false,
+  stats: null,
+  sources: [],
+  results: [],
+};
+
+function showKnowledgePanel() {
+  knowledgeState.active = true;
+  document.getElementById("knowledge-panel").classList.remove("hidden");
+  document.getElementById("chat-panel").style.display = "none";
+  document.getElementById("knowledge-tab-btn").classList.add("active");
+  refreshKnowledgeStats();
+  refreshKnowledgeSources();
+}
+
+function hideKnowledgePanel() {
+  knowledgeState.active = false;
+  document.getElementById("knowledge-panel").classList.add("hidden");
+  document.getElementById("chat-panel").style.display = "";
+  document.getElementById("knowledge-tab-btn").classList.remove("active");
+}
+
+function toggleKnowledgePanel() {
+  if (knowledgeState.active) {
+    hideKnowledgePanel();
+  } else {
+    showKnowledgePanel();
+  }
+}
+
+async function refreshKnowledgeStats() {
+  try {
+    const data = await api("/api/knowledge/stats");
+    knowledgeState.stats = data;
+    document.getElementById("kstat-sources").textContent = data.sources || 0;
+    document.getElementById("kstat-records").textContent = data.records || 0;
+    document.getElementById("kstat-chunks").textContent = data.chunks || 0;
+    document.getElementById("kstat-embedded").textContent = data.embedded || 0;
+
+    // Update embed button state
+    const pending = (data.chunks || 0) - (data.embedded || 0);
+    const embedBtn = document.getElementById("knowledge-embed-btn");
+    const embedStatus = document.getElementById("knowledge-embed-status");
+    if (pending > 0) {
+      embedBtn.disabled = false;
+      embedStatus.textContent = `${pending} chunks pending`;
+    } else {
+      embedBtn.disabled = true;
+      embedStatus.textContent = data.chunks > 0 ? "All chunks embedded" : "No chunks to embed";
+    }
+  } catch (error) {
+    // Silent
+  }
+}
+
+async function refreshKnowledgeSources() {
+  try {
+    const data = await api("/api/knowledge/sources");
+    knowledgeState.sources = data.sources || [];
+    renderKnowledgeSources(data.sources);
+  } catch (error) {
+    document.getElementById("knowledge-sources-list").innerHTML =
+      `<div class="knowledge-empty-hint">Failed to load sources.</div>`;
+  }
+}
+
+const SOURCE_COLORS = {
+  pi: "#f5a623",
+  claude: "#bc8cff",
+  codex: "#34d058",
+  factory: "#f85149",
+  opencode: "#58a6ff",
+  qwen_code: "#ff7b72",
+};
+
+function renderKnowledgeSources(sources) {
+  const container = document.getElementById("knowledge-sources-list");
+  if (!sources.length) {
+    container.innerHTML = `<div class="knowledge-empty-hint">No AI session directories found.</div>`;
+    return;
+  }
+
+  container.innerHTML = sources.map((s) => {
+    const color = SOURCE_COLORS[s.source] || "var(--text-tertiary)";
+    const statusClass = s.available ? "available" : "unavailable";
+    const statusText = s.available ? `${s.files} file${s.files !== 1 ? "s" : ""}` : "Not found";
+    return `
+      <div class="ksource">
+        <div class="ksource-info">
+          <span class="source-dot" style="background:${color};width:8px;height:8px;border-radius:50%;flex-shrink:0;"></span>
+          <div>
+            <div class="ksource-name">${escapeHtml(s.source)}</div>
+            <div class="ksource-path">${escapeHtml(s.path)}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="ksource-status ${statusClass}">${statusText}</span>
+          ${s.available && s.files > 0 ? `<button class="btn btn-secondary btn-sm ingest-source-btn" data-source="${escapeHtml(s.source)}" data-path="${escapeHtml(s.path)}">
+            <i data-lucide="upload" class="icon-xs"></i>
+            Ingest
+          </button>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  container.querySelectorAll(".ingest-source-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const source = btn.dataset.source;
+      const path = btn.dataset.path;
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader" class="icon-xs" style="animation:spin 1s linear infinite;"></i> Ingesting…';
+      if (window.lucide) lucide.createIcons({ nodes: [btn] });
+      try {
+        const result = await api("/api/knowledge/ingest", {
+          method: "POST",
+          body: JSON.stringify({ source, path, embed: true }),
+        });
+        const summary = result.summary || {};
+        showToast(
+          `Ingested ${summary.total_records || 0} records, ${summary.total_chunks || 0} chunks`,
+          "success",
+          4000
+        );
+        await refreshKnowledgeStats();
+      } catch (error) {
+        showToast(`Ingestion failed: ${error.message}`, "error");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="upload" class="icon-xs"></i> Ingest';
+        if (window.lucide) lucide.createIcons({ nodes: [btn] });
+      }
+    };
+  });
+}
+
+async function searchKnowledge() {
+  const query = document.getElementById("knowledge-search-input").value.trim();
+  if (!query) return;
+
+  const useVectors = document.getElementById("knowledge-use-vectors").checked;
+  const resultsContainer = document.getElementById("knowledge-results");
+  resultsContainer.innerHTML = `<div class="knowledge-empty-state"><div class="knowledge-empty-title">Searching…</div></div>`;
+
+  try {
+    const data = await api("/api/knowledge/query", {
+      method: "POST",
+      body: JSON.stringify({ query, top_k: 15, use_vectors: useVectors }),
+    });
+
+    knowledgeState.results = data.results || [];
+    const searchStats = data.stats || {};
+
+    if (!knowledgeState.results.length) {
+      resultsContainer.innerHTML = `
+        <div class="knowledge-empty-state">
+          <i data-lucide="search" style="width:48px;height:48px;color:var(--text-tertiary);"></i>
+          <div class="knowledge-empty-title">No results found</div>
+          <div class="knowledge-empty-subtitle">Try different keywords or ingest more sources.</div>
+        </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [resultsContainer] });
+      return;
+    }
+
+    resultsContainer.innerHTML = knowledgeState.results.map((r, i) => {
+      const color = SOURCE_COLORS[r.source] || "var(--text-tertiary)";
+      const scoreBreakdown = [];
+      if (r.bm25_score > 0) scoreBreakdown.push(`BM25 ${r.bm25_score.toFixed(2)}`);
+      if (r.vector_score > 0) scoreBreakdown.push(`Vec ${r.vector_score.toFixed(2)}`);
+      const scoreText = scoreBreakdown.length > 0 ? scoreBreakdown.join(" · ") : `Score ${r.score.toFixed(2)}`;
+
+      // Highlight matched terms
+      let text = escapeHtml(r.text);
+      if (r.matched_terms && r.matched_terms.length > 0) {
+        for (const term of r.matched_terms) {
+          const regex = new RegExp(`(${escapeRegex(term)})`, "gi");
+          text = text.replace(regex, "<mark>$1</mark>");
+        }
+      }
+
+      return `
+        <div class="kresult" style="animation-delay:${i * 30}ms;">
+          <div class="kresult-header">
+            <span class="kresult-source">
+              <span class="source-dot" style="background:${color}"></span>
+              ${escapeHtml(r.source)}
+            </span>
+            <span class="kresult-score">${scoreText}</span>
+          </div>
+          <div class="kresult-title">${escapeHtml(r.title)}</div>
+          <div class="kresult-text">${text}</div>
+          <div class="kresult-footer">
+            ${r.category ? `<span class="kresult-tag">${escapeHtml(r.category)}</span>` : ""}
+            <span>${searchStats.elapsed_ms ? searchStats.elapsed_ms.toFixed(0) + "ms" : ""}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    if (window.lucide) lucide.createIcons({ nodes: [resultsContainer] });
+  } catch (error) {
+    resultsContainer.innerHTML = `
+      <div class="knowledge-empty-state">
+        <div class="knowledge-empty-title" style="color:var(--red);">Search failed</div>
+        <div class="knowledge-empty-subtitle">${escapeHtml(error.message)}</div>
+      </div>`;
+  }
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function embedKnowledge() {
+  const embedBtn = document.getElementById("knowledge-embed-btn");
+  const progress = document.getElementById("knowledge-embed-progress");
+  embedBtn.disabled = true;
+  progress.textContent = "Generating embeddings…";
+
+  try {
+    const data = await api("/api/knowledge/embed", {
+      method: "POST",
+      body: JSON.stringify({ batch_size: 32 }),
+    });
+    const embedded = data.embedded || 0;
+    const failed = data.failed || 0;
+    if (embedded > 0) {
+      showToast(`Embedded ${embedded} chunks${failed > 0 ? ` (${failed} failed)` : ""}`, "success");
+    } else {
+      showToast("No new chunks to embed", "info", 2000);
+    }
+    await refreshKnowledgeStats();
+  } catch (error) {
+    showToast(`Embedding failed: ${error.message}`, "error");
+  } finally {
+    progress.textContent = "";
+    const pending = (knowledgeState.stats?.chunks || 0) - (knowledgeState.stats?.embedded || 0);
+    embedBtn.disabled = pending <= 0;
+  }
+}
+
+async function clearKnowledge() {
+  const confirmed = await confirmDialog(
+    "Clear knowledge base?",
+    "All sources, records, chunks, and embeddings will be permanently deleted."
+  );
+  if (!confirmed) return;
+
+  try {
+    await api("/api/knowledge", { method: "DELETE" });
+    showToast("Knowledge base cleared", "success", 2000);
+    await refreshKnowledgeStats();
+    document.getElementById("knowledge-results").innerHTML = `
+      <div class="knowledge-empty-state">
+        <i data-lucide="brain" style="width:48px;height:48px;color:var(--text-tertiary);"></i>
+        <div class="knowledge-empty-title">No results yet</div>
+        <div class="knowledge-empty-subtitle">Search across your indexed AI conversations, or ingest new sources below.</div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  } catch (error) {
+    showToast(`Failed to clear: ${error.message}`, "error");
+  }
+}
 
 (async function init() {
   // Initialize Lucide icons
@@ -1733,4 +2019,7 @@ document.getElementById("empty-shortcuts").addEventListener("click", (e) => {
   setInterval(refreshModels, 5000);
   setInterval(refreshServerStatus, 5000);
   setInterval(refreshDiagnostics, 5000);
+  setInterval(() => {
+    if (knowledgeState.active) refreshKnowledgeStats();
+  }, 10000);
 })();

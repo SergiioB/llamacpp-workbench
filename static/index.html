@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=ux-v2-20260511" />
+    <link rel="stylesheet" href="/static/styles.css?v=ux-v2-20260511-kb" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,6 +60,11 @@
           New Chat
         </button>
 
+        <button id="knowledge-tab-btn" class="sidebar-tab-btn">
+          <i data-lucide="brain" class="icon-sm"></i>
+          Knowledge
+        </button>
+
         <div class="sidebar-divider"></div>
 
         <div id="chat-list" class="chat-list"></div>
@@ -79,6 +84,109 @@
 
       <!-- Main Chat Area -->
       <main class="main-panel">
+
+        <!-- Knowledge Panel -->
+        <div id="knowledge-panel" class="knowledge-panel hidden">
+          <div class="knowledge-header">
+            <div class="knowledge-header-left">
+              <button id="knowledge-back-btn" class="icon-btn" title="Back to chat">
+                <i data-lucide="arrow-left" class="icon-md"></i>
+              </button>
+              <div>
+                <div class="knowledge-title">Knowledge Base</div>
+                <div class="knowledge-subtitle">Search your AI conversation history</div>
+              </div>
+            </div>
+            <div class="knowledge-header-actions">
+              <button id="knowledge-clear-btn" class="btn btn-ghost btn-sm" title="Clear all knowledge data">
+                <i data-lucide="trash-2" class="icon-xs"></i>
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Strip -->
+          <div class="knowledge-stats" id="knowledge-stats">
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-sources">0</span>
+              <span class="kstat-label">Sources</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-records">0</span>
+              <span class="kstat-label">Records</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-chunks">0</span>
+              <span class="kstat-label">Chunks</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-embedded">0</span>
+              <span class="kstat-label">Embedded</span>
+            </div>
+          </div>
+
+          <!-- Search -->
+          <div class="knowledge-search">
+            <div class="knowledge-search-bar">
+              <i data-lucide="search" class="icon-sm"></i>
+              <input id="knowledge-search-input" type="text" placeholder="Search your AI conversations…" />
+              <label class="knowledge-toggle">
+                <input type="checkbox" id="knowledge-use-vectors" checked />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Vectors</span>
+              </label>
+              <button id="knowledge-search-btn" class="btn btn-primary btn-sm">
+                <i data-lucide="search" class="icon-xs"></i>
+                Search
+              </button>
+            </div>
+          </div>
+
+          <!-- Search Results -->
+          <div id="knowledge-results" class="knowledge-results">
+            <div class="knowledge-empty-state">
+              <i data-lucide="brain" style="width:48px;height:48px;color:var(--text-tertiary);"></i>
+              <div class="knowledge-empty-title">No results yet</div>
+              <div class="knowledge-empty-subtitle">Search across your indexed AI conversations, or ingest new sources below.</div>
+            </div>
+          </div>
+
+          <!-- Sources Section -->
+          <div class="knowledge-section">
+            <div class="knowledge-section-header">
+              <h3>
+                <i data-lucide="folder-search" class="icon-sm"></i>
+                Discovered Sources
+              </h3>
+              <button id="knowledge-refresh-sources" class="btn btn-ghost btn-sm">
+                <i data-lucide="refresh-cw" class="icon-xs"></i>
+                Refresh
+              </button>
+            </div>
+            <div id="knowledge-sources-list" class="knowledge-sources-list">
+              <div class="knowledge-empty-hint">Loading sources…</div>
+            </div>
+          </div>
+
+          <!-- Embed Section -->
+          <div class="knowledge-section">
+            <div class="knowledge-section-header">
+              <h3>
+                <i data-lucide="layers" class="icon-sm"></i>
+                Generate Embeddings
+              </h3>
+              <span id="knowledge-embed-status" class="kstat-label">Requires running server</span>
+            </div>
+            <div class="knowledge-embed-controls">
+              <button id="knowledge-embed-btn" class="btn btn-primary btn-sm" disabled>
+                <i data-lucide="cpu" class="icon-xs"></i>
+                Embed Pending Chunks
+              </button>
+              <span id="knowledge-embed-progress" class="knowledge-embed-progress"></span>
+            </div>
+          </div>
+        </div>
+
         <div class="chat-panel" id="chat-panel">
           <!-- Chat Header -->
           <div class="chat-header">
@@ -543,6 +651,6 @@
     <div id="toast-container" class="toast-container"></div>
 
     <script src="/static/vendor/markdown-it.min.js"></script>
-    <script src="/static/app.js?v=ux-v2-20260511"></script>
+    <script src="/static/app.js?v=ux-v2-20260511-kb"></script>
   </body>
 </html>
