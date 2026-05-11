@@ -174,7 +174,7 @@ class LlamaServerManager:
             try:
                 import ctypes
 
-                kernel32 = ctypes.windll.kernel32
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
                 handle = kernel32.OpenProcess(0x1000, False, pid)
                 if handle:
                     exit_code = ctypes.c_ulong()

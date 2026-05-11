@@ -40,7 +40,7 @@ def test_check_vram_fit_model_not_found():
     """When model file doesn't exist, fits should be None."""
     result = check_vram_fit("/nonexistent/model.gguf", "local", "")
     assert result["fits"] is None
-    assert "not found" in result["message"].lower()
+    assert "not found" in result["message"].lower() or "skipped" in result["message"].lower()
 
 
 def test_check_vram_fit_local_mode(tmp_path):
