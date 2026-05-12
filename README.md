@@ -13,7 +13,7 @@
 
 ## What This Is
 
-`llama-webui` is a standalone local web interface for `llama.cpp`, intentionally without Ollama. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
+`llama-webui` is a standalone local web interface for `llama.cpp` with no Ollama dependency. Ollama was removed after CVE-2026-7482 (CVSS 9.1) exposed a critical RCE vulnerability. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
 
 This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves three purposes:
 
@@ -27,7 +27,7 @@ The main point is simple: keep the convenience of a web UI without giving up the
 
 Many local-AI UIs optimize for convenience first and runtime visibility second. `llama-webui` is deliberately built the other way around.
 
-- It talks to compiled `llama.cpp` directly instead of wrapping Ollama.
+- It talks to compiled `llama.cpp` directly — no Ollama dependency (removed after CVE-2026-7482).
 - It preserves the flags that actually decide whether a host feels usable:
   - KV cache type
   - context window
@@ -52,9 +52,11 @@ If you just want a generic chat shell, other tools already cover that. This repo
 
 ### Versus Ollama-based UIs
 
+- Ollama removed after CVE-2026-7482 (CVSS 9.1 critical RCE)
 - more direct control over `llama.cpp` startup flags
 - easier to reason about model-specific tuning and failure modes
 - better fit for benchmarking, profiling, and constrained-hardware tuning
+- no hidden abstraction layer between you and the runtime knobs
 
 ### Versus desktop-first local AI tools
 
@@ -80,7 +82,7 @@ Most local-AI tools talk about ARM boards as a novelty. This repo does not.
 
 ## Key Features
 
-- `llama.cpp` only, with no Ollama dependency or hidden abstraction layer
+- `llama.cpp` only — Ollama removed after CVE-2026-7482 (CVSS 9.1)
 - Browser-driven model loading and runtime config editing
 - GPU auto-detection for CUDA, ROCm, Metal, and CPU-first profiles
 - Streaming responses via Server-Sent Events

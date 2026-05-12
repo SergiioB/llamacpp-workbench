@@ -95,33 +95,25 @@ def benchmark_dir() -> Path:
 
 
 def knowledge_source_paths() -> dict[str, list[Path]]:
-    """Return discovery paths for AI tool session directories.
+    """Return manually configured source paths.
 
-    Configurable via LLAMA_WEBUI_KNOWLEDGE_SOURCES env var:
+    Configured via LLAMA_WEBUI_KNOWLEDGE_SOURCES env var:
       pi=/path/to/sessions;claude=/path/to/projects:~/alt/projects;...
 
-    Falls back to standard tool paths under the user's home directory.
+    Returns empty dict if not configured — discovery is done dynamically
+    by scanning well-known candidate directories under the user's home.
     """
     configured = os.environ.get("LLAMA_WEBUI_KNOWLEDGE_SOURCES")
-    if configured:
-        result: dict[str, list[Path]] = {}
-        for entry in configured.split(";"):
-            if "=" not in entry:
-                continue
-            name, paths_str = entry.split("=", 1)
-            name = name.strip()
-            result[name] = [Path(p).expanduser() for p in paths_str.split(":") if p.strip()]
-        return result
-
-    home = Path.home()
-    return {
-        "pi": [home / ".pi" / "agent" / "sessions"],
-        "claude": [home / ".claude" / "projects"],
-        "codex": [home / ".codex" / "sessions"],
-        "factory": [home / ".factory" / "sessions"],
-        "opencode": [home / ".local" / "share" / "opencode"],
-        "qwen_code": [home / ".qwen" / "projects"],
-    }
+    if not configured:
+        return {}
+    result: dict[str, list[Path]] = {}
+    for entry in configured.split(";"):
+        if "=" not in entry:
+            continue
+        name, paths_str = entry.split("=", 1)
+        name = name.strip()
+        result[name] = [Path(p).expanduser() for p in paths_str.split(":") if p.strip()]
+    return result
 
 
 def _resolve_binary(env_var: str, command_name: str, candidates: list[Path]) -> str:
