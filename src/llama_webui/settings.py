@@ -26,10 +26,28 @@ def _has_nvidia_gpu() -> bool:
         return False
 
 
+def _has_amd_gpu() -> bool:
+    # Check for AMD GPU via DRI (works for RDNA3, ROCm 6.x)
+    if os.path.exists("/sys/class/drm/card0/device/vendor"):
+        try:
+            vendor = Path("/sys/class/drm/card0/device/vendor").read_text().strip()
+            # AMD vendor ID: 0x1002
+            return vendor == "0x1002"
+        except OSError:
+            pass
+    # Fallback: check for rocm-smi
+    try:
+        result = subprocess.run(["rocm-smi", "--showproductname"], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    return False
+
+
 def _detect_gpu_backend() -> Literal["cuda", "rocm", "metal", "cpu"]:
     if _has_nvidia_gpu():
         return "cuda"
-    if os.path.exists("/sys/kernel/mm/amd-tee"):
+    if _has_amd_gpu():
         return "rocm"
     if os.uname().machine.startswith("arm64") and os.path.exists(
         "/System/Library/Extensions/AGL.framework"
@@ -137,6 +155,7 @@ def resolve_llama_server_binary() -> str:
         base / "prebuilt" / "llama-server.exe",  # Windows prebuilt
         base / "prebuilt" / "llama-server",
         base / "build-cuda" / "bin" / "llama-server",
+        base / "build-hip" / "bin" / "llama-server",
         base / "build" / "bin" / "llama-server",
         base / "build-rk-opt" / "bin" / "llama-server",
     ]
@@ -148,6 +167,12 @@ def resolve_llama_server_binary() -> str:
             base / "build" / "bin" / "llama-server",
         ]
         candidates = cuda_first + [c for c in candidates if c not in cuda_first]
+    if GPU_BACKEND == "rocm":
+        rocm_first = [
+            base / "build-hip" / "bin" / "llama-server",
+            base / "build" / "bin" / "llama-server",
+        ]
+        candidates = rocm_first + [c for c in candidates if c not in rocm_first]
     return _resolve_binary("LLAMA_WEBUI_LLAMA_SERVER", "llama-server", candidates)
 
 
@@ -157,6 +182,7 @@ def resolve_llama_cli_binary() -> str:
         base / "prebuilt" / "llama-cli.exe",  # Windows prebuilt
         base / "prebuilt" / "llama-cli",
         base / "build-cuda" / "bin" / "llama-cli",
+        base / "build-hip" / "bin" / "llama-cli",
         base / "build" / "bin" / "llama-cli",
         base / "build-rk-opt" / "bin" / "llama-cli",
     ]
@@ -168,4 +194,10 @@ def resolve_llama_cli_binary() -> str:
             base / "build" / "bin" / "llama-cli",
         ]
         candidates = cuda_first + [c for c in candidates if c not in cuda_first]
+    if GPU_BACKEND == "rocm":
+        rocm_first = [
+            base / "build-hip" / "bin" / "llama-cli",
+            base / "build" / "bin" / "llama-cli",
+        ]
+        candidates = rocm_first + [c for c in candidates if c not in rocm_first]
     return _resolve_binary("LLAMA_WEBUI_LLAMA_CLI", "llama-cli", candidates)

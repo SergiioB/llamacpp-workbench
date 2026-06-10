@@ -408,6 +408,37 @@ Prerequisites for Windows CUDA builds:
 - CUDA Toolkit 12.4 or later, with 12.8+ recommended for RTX 50-series
 - CMake 3.18+
 
+### AMD ROCm Build (RX 7800 XT / RDNA3)
+
+Tested on Ubuntu 24.04 with ROCm 6.4.4 and an RX 7800 XT (gfx1101).
+
+```bash
+# Prerequisites: ROCm 6.4+ installed and HSA_OVERRIDE_GFX_VERSION set if needed
+git clone https://github.com/ggerganov/llama.cpp.git third_party/llama.cpp
+cd third_party/llama.cpp
+mkdir build-hip && cd build-hip
+
+cmake .. \
+  -DGGML_HIP=ON \
+  -DAMDGPU_TARGETS=gfx1101 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_HIP_ROCWMMA_FATTN=ON \
+  -DGGML_HIP_GRAPHS=ON \
+  -DGGML_HIP_MMQ_MFMA=ON \
+  -DGGML_HIP_NO_VMM=ON
+
+cmake --build . --config Release -j$(nproc)
+```
+
+Key build flags explained:
+
+- `GGML_HIP_ROCWMMA_FATTN=ON` — FlashAttention via AMD matrix cores
+- `GGML_HIP_GRAPHS=ON` — HIP graph capture for reduced launch overhead
+- `GGML_HIP_MMQ_MFMA=ON` — RDNA3 MFMA matrix multiply kernels
+- `GGML_HIP_NO_VMM=ON` — Avoids virtual memory overhead on RDNA3
+
+The binary resolves automatically from `third_party/llama.cpp/build-hip/bin/` when ROCm is detected.
+
 ### CPU-only / RK3588 Build
 
 ```bash
@@ -434,11 +465,11 @@ cmake --build . --config Release -j$(nproc)
 | Backend | Detection | Default Settings |
 |---------|-----------|------------------|
 | **CUDA** | `nvidia-smi` available | `gpu_layers=99`, `parallel=4`, `batch_size=512` |
-| **ROCm** | AMD GPU path | Same as CUDA profile |
+| **ROCm** | AMD GPU vendor ID (`0x1002`) or `rocm-smi` | `gpu_layers=99`, `flash_attn=on`, `parallel=1`, `kv=q8_0/q8_0` |
 | **Metal** | Apple Silicon | Managed by llama.cpp |
 | **CPU** | Fallback | `gpu_layers=0`, `parallel=1`, `batch_size=128` |
 
-The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ubatch_size`, model presets, and build-path priority for `llama-server`.
+The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ubatch_size`, model presets, and build-path priority for `llama-server`. ROCm detection checks `/sys/class/drm/card*/device/vendor` for the AMD vendor ID (`0x1002`), with a `rocm-smi` fallback.
 
 ## Tested Hardware
 
@@ -458,6 +489,16 @@ The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ub
 - GPU: NVIDIA GeForce RTX 5060 Laptop GPU plus Intel Arc 140T
 - RAM: 32 GB
 - CUDA: 12.8+ for Blackwell-class support
+
+### AMD Linux Desktop (AI Node)
+
+- OS: Ubuntu 24.04 LTS (headless)
+- CPU: AMD Ryzen 7 3800X
+- GPU: Sapphire RX 7800 XT 16GB (gfx1101, RDNA3)
+- RAM: 16 GB DDR4
+- ROCm: 6.4.4
+- Access: Tailscale, sleeps 01:00-07:30
+- Tested models: `Qwen3.6-35B-A3B` (IQ3_XXS), `GLM-4.7-REAP-23B` (IQ4_XS), `Qwen3-27B` (Q4_K_M)
 
 ### Windows-to-Windows RPC
 
@@ -517,7 +558,63 @@ Reason:
 - Slower than 2B on RK3588, but structurally better on harder prompts
 - Better treated as a quality tier than as the universal default
 
+### RX 7800 XT 16GB — MoE 35B at 128K context
+
+Model:
+
+- `Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf` (13 GB)
+- MoE: 35B total / 3B active per token
+- IQ3_XXS — most aggressive quant that stays coherent; anything larger loses KV cache headroom for 128K
+
+Validated settings:
+
+- GPU layers: `99` (full offload)
+- Flash attention: `ON` (mandatory for 128K)
+- Context: `131072` (128K)
+- Batch size: `512`
+- Micro batch: `128`
+- KV cache: `--cache-type-k q8_0 --cache-type-v q8_0` (halves VRAM vs FP16)
+- Reasoning: `--reasoning off` (10x fewer output tokens, higher benchmark scores)
+- Throughput: ~60 tok/s
+
+Why it works:
+
+- IQ quants crush K-quants on RDNA3: same model in Q3_K_L (14 GB) → 17 tok/s vs IQ4_XS (12.6 GB) → 60 tok/s
+- MoE is bandwidth-bound, not compute-bound — power cap from 190W to 80W shows near-zero throughput loss
+- GPU draws 56-81W during inference
+
+### RX 7800 XT 16GB — Dense 27B at 160K context
+
+Model:
+
+- `Qwen3-27B-Q4_K_M.gguf` or similar dense 27B
+
+Validated settings:
+
+- GPU layers: `99`
+- Flash attention: `ON`
+- Context: `163840` (160K)
+- Batch size: `512`
+- Micro batch: `128`
+- KV cache: `--cache-type-k q8_0 --cache-type-v q8_0`
+
+Context ceiling on 16GB:
+
+- Dense 27B: 160K max (192K OOMs by only 505MB)
+- MoE 35B/3B: comfortable at 128K
+- MoE 26B/A4B (e.g. Gemma-4-26B-A4B): 256K possible with IQ2_M + Q4_0 KV
+
 ## What We Learned
+
+### On AMD RDNA3 / ROCm
+
+- IQ quants massively outperform K-quants on gfx1101 — the IQ decompression kernels are significantly better optimized for this architecture
+- MoE inference is bandwidth-bound, not compute-bound — cutting power cap by >50% barely changes throughput
+- Flash attention is mandatory for any context above ~32K on 16GB VRAM
+- `--reasoning off` on Qwen3.6 MoE gives 10x fewer output tokens for the same quality — worth it for always-on inference
+- KV cache q8_0/q8_0 is the sweet spot: halves VRAM vs FP16, better coherence than q4_0
+
+### On ARM / RK3588
 
 - REAP-pruned MoE models deliver strong quality-per-size on constrained hardware
 - Disabling reasoning scratchpad improved interactive latency materially on RK3588
@@ -536,6 +633,7 @@ Reason:
 | Benchmark helpers | ✅ Production-ready |
 | Windows-to-Windows RPC split serving | ✅ Validated |
 | RK3588-tuned presets | ✅ Production-ready |
+| ROCm/RX 7800 XT presets | ✅ Production-ready |
 | Windows setup flow | ✅ Available |
 | Knowledge Base / RAG | ✅ Available |
 | Knowledge-augmented chat | ✅ Available |

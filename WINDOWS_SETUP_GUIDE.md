@@ -204,6 +204,51 @@ llama-webui
 
 Open browser to: http://localhost:8095
 
+## Browser Inference (No Build Required)
+
+If you just want to try LLM inference quickly without building llama.cpp, `llama-webui` supports running models directly in the browser via WebGPU.
+
+**Requirements:**
+- Google Chrome 113+ or Microsoft Edge 113+
+- Any GPU (NVIDIA, AMD, Intel Arc)
+
+**Steps:**
+
+1. Start the server:
+   ```powershell
+   .venv\Scripts\activate
+   llama-webui
+   ```
+
+2. Open http://localhost:8095 in Chrome or Edge
+
+3. The sidebar shows **"Browser Inference (WebGPU)"** -- click **"Enable Browser Mode"**
+
+4. Select a model (e.g., Qwen 2.5 1.5B) and click **"Load"**
+
+5. Wait for the model to download (~1 GB for Qwen 1.5B, cached after first load)
+
+6. Chat normally -- inference runs on your GPU via WebGPU
+
+**Available browser models:**
+
+| Model | Download Size | VRAM Needed |
+|-------|--------------|-------------|
+| SmolLM2 135M | ~100 MB | Any GPU |
+| SmolLM2 360M | ~220 MB | Any GPU |
+| Llama 3.2 1B | ~700 MB | 2 GB |
+| Qwen 2.5 1.5B | ~1 GB | 2 GB |
+| Qwen 2.5 3B | ~1.8 GB | 4 GB |
+| Phi 3.5 Mini | ~2.3 GB | 4 GB |
+| Gemma 2 2B | ~1.4 GB | 4 GB |
+| Qwen 2.5 7B | ~4 GB | 8 GB |
+| Llama 3.1 8B | ~4.5 GB | 8 GB |
+
+**When to use browser vs server mode:**
+
+- **Browser mode**: Quick testing, no-install, models up to ~8B parameters
+- **Server mode** (with llama.cpp built): Larger models (27B+), fine-grained control, custom flags, higher throughput
+
 ## GPU Configuration for Dual GPU Laptops
 
 On laptops with both integrated and discrete GPUs, Windows may use the integrated GPU by default. To force NVIDIA:
