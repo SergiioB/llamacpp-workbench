@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .app_state import AppState
 from .download_manager import ModelDownloadManager
+from .hf_discovery import HardwareProfile, recommend_models
 from .llama_manager import LlamaServerManager
 from .model_inventory import (
     apply_model_profile,
@@ -106,6 +107,23 @@ def stop_generation() -> dict[str, Any]:
 @app.get("/api/models")
 def list_models() -> dict[str, Any]:
     return {"models": scan_models(), "downloads": downloads.list_jobs()}
+
+
+@app.get("/api/models/discover")
+def discover_models(limit: int = 10, query: str = "", arch: str = "any", max_gb: float | None = None) -> dict[str, Any]:
+    hardware = HardwareProfile.from_system()
+    if max_gb is not None:
+        hardware.max_model_gb = max_gb
+    results = recommend_models(hardware, limit=limit, query=query, arch_pref=arch)
+    return {
+        "hardware": {
+            "total_ram_gb": hardware.total_ram_gb,
+            "max_model_gb": hardware.max_model_gb,
+            "gpu_backend": hardware.gpu_backend,
+            "is_arm": hardware.is_arm,
+        },
+        "models": [m.to_dict() for m in results],
+    }
 
 
 @app.post("/api/models/load")

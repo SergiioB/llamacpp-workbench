@@ -125,6 +125,9 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
     if GPU_BACKEND == "cuda":
         return _cuda_profile_for_model(tuned, lower, model_path)
 
+    if GPU_BACKEND == "rocm":
+        return _rocm_profile_for_model(tuned, lower, model_path)
+
     if _is_glm_flash_reap(model_path):
         tuned.update(
             {
@@ -192,6 +195,115 @@ def apply_model_profile(config: dict[str, Any], model_path: str) -> dict[str, An
         return tuned
 
     return tuned
+
+
+def _rocm_profile_for_model(config: dict[str, Any], lower: str, model_path: str) -> dict[str, Any]:
+    """Hardware-tuned profiles for AMD ROCm GPUs (tested on RX 7800 XT 16GB, gfx1101).
+
+    Key optimizations for RDNA3 + ROCm 6.4.4:
+    - Flash attention ON (mandatory for long context)
+    - KV cache q8_0/q8_0 (halves VRAM vs FP16, better quality than q4_0)
+    - IQ quants preferred over K-quants (IQ decompression kernels better optimized for gfx1101)
+    - MoE models are bandwidth-bound, not compute-bound (power cap has near-zero impact)
+    """
+    # Common ROCm flags for all models on RX 7800 XT
+    rocm_base = {
+        "gpu_layers": 99,
+        "flash_attn": True,
+        "parallel": 1,
+    }
+    config.update(rocm_base)
+
+    # --- MoE 35B/3B (e.g. Qwen3.6-35B-A3B) ---
+    # Proven: IQ3_XXS 13GB → 128K context, ~60 tok/s
+    if "35b" in lower and ("a3b" in lower or "moe" in lower):
+        config.update({
+            "ctx_size": 131072,
+            "batch_size": 512,
+            "ubatch_size": 128,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        # Disable thinking for Qwen3.6 MoE — points higher but 10x tokens, not worth it
+        if "qwen" in lower and ("3.6" in lower or "3.5" in lower):
+            config["custom_args"] += " --reasoning off"
+        return config
+
+    # --- MoE 23B/26B (e.g. GLM-4.7-REAP, Gemma-4-26B-A4B) ---
+    if ("23b" in lower or "26b" in lower) and ("a3b" in lower or "a4b" in lower or "reap" in lower):
+        config.update({
+            "ctx_size": 131072,
+            "batch_size": 512,
+            "ubatch_size": 128,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on --reasoning-budget 0 --reasoning-format none",
+        })
+        return config
+
+    # --- Dense 27B (e.g. Qwen3-27B) ---
+    # Proven: max 160K context on 16GB, OOMs at 192K by only 505MB
+    if "27b" in lower:
+        config.update({
+            "ctx_size": 163840,
+            "batch_size": 512,
+            "ubatch_size": 128,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        return config
+
+    # --- 32B dense ---
+    if "32b" in lower:
+        config.update({
+            "ctx_size": 65536,
+            "batch_size": 512,
+            "ubatch_size": 128,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        return config
+
+    # --- 14B-18B ---
+    if any(s in lower for s in ("18b", "17b", "14b", "13b")):
+        config.update({
+            "ctx_size": 131072,
+            "batch_size": 512,
+            "ubatch_size": 128,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        return config
+
+    # --- 7B-9B ---
+    if any(s in lower for s in ("9b", "8b", "7b")):
+        config.update({
+            "ctx_size": 131072,
+            "batch_size": 512,
+            "ubatch_size": 256,
+            "max_tokens": 4096,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        return config
+
+    # --- Small models (4B and below) ---
+    if any(s in lower for s in ("4b", "3b", "2b", "1.7b", "0.8b")):
+        config.update({
+            "ctx_size": 262144,
+            "batch_size": 512,
+            "ubatch_size": 256,
+            "max_tokens": 8192,
+            "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+        })
+        return config
+
+    # --- Fallback for unrecognized models ---
+    config.update({
+        "ctx_size": 65536,
+        "batch_size": 512,
+        "ubatch_size": 128,
+        "custom_args": "--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on",
+    })
+    return config
 
 
 def _cuda_profile_for_model(config: dict[str, Any], lower: str, model_path: str) -> dict[str, Any]:
@@ -295,6 +407,50 @@ def build_model_presets(defaults: dict[str, Any], candidates: list[str] | None =
     presets: list[dict[str, Any]] = []
     day_model = _find_matching_model(available, _is_day_qwen)
     night_model = _find_matching_model(available, _is_glm_flash_reap)
+
+    if GPU_BACKEND == "rocm":
+        rocm_moe = _find_matching_model(available, lambda p: "35b" in p.lower() and ("a3b" in p.lower() or "moe" in p.lower()))
+        rocm_dense = _find_matching_model(available, lambda p: "27b" in p.lower())
+
+        if rocm_moe:
+            presets.append({
+                "id": "rocm-moe-35b",
+                "label": "ROCm MoE 35B (128K)",
+                "description": "RX 7800 XT optimized: MoE 35B/3B with 128K context, q8_0 KV, flash attention.",
+                "config": apply_model_profile(
+                    {
+                        **defaults,
+                        "temperature": 0.7,
+                        "top_p": 0.95,
+                        "top_k": 40,
+                        "min_p": 0.0,
+                        "repeat_penalty": 1.05,
+                        "presence_penalty": 0.0,
+                    },
+                    rocm_moe,
+                ),
+            })
+
+        if rocm_dense:
+            presets.append({
+                "id": "rocm-dense-27b",
+                "label": "ROCm Dense 27B (160K)",
+                "description": "RX 7800 XT optimized: Dense 27B with 160K context, q8_0 KV, flash attention.",
+                "config": apply_model_profile(
+                    {
+                        **defaults,
+                        "temperature": 0.7,
+                        "top_p": 0.95,
+                        "top_k": 40,
+                        "min_p": 0.0,
+                        "repeat_penalty": 1.05,
+                        "presence_penalty": 0.0,
+                    },
+                    rocm_dense,
+                ),
+            })
+
+        return presets
 
     if GPU_BACKEND == "cuda":
         cuda_large = _find_matching_model(available, lambda p: "27b" in p.lower() or "qwen" in p.lower())
