@@ -4,126 +4,656 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>llama-webui</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='10' y='10' width='80' height='80' rx='16' fill='%230a0a0b' stroke='%23585b60' stroke-width='3'/><text x='50' y='68' font-family='monospace' font-size='48' font-weight='bold' fill='%23f5a623' text-anchor='middle'>ll</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=ux-v2-20260511-kb" />
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
-          <h1>llama-webui</h1>
-          <button id="new-chat">New Chat</button>
-        </div>
-        <div class="server-strip">
-          <span id="server-indicator" class="badge offline">offline</span>
-          <button id="start-server">Start</button>
-          <button id="stop-server">Stop</button>
-        </div>
-        <div id="browser-section" class="browser-section">
-          <div class="browser-header">Browser Inference (WebGPU)</div>
-          <div id="browser-status" class="browser-status">Not initialized</div>
-          <div class="browser-controls">
-            <button id="init-browser">Enable Browser Mode</button>
+          <div class="sidebar-brand">
+            <span class="brand-mark">ll</span>
+            <span class="brand-text">llama-webui</span>
           </div>
-          <div class="browser-model-row">
-            <select id="browser-model-select" disabled></select>
-            <button id="load-browser-model" disabled>Load</button>
+          <div class="sidebar-controls">
+            <span id="server-indicator" class="server-status offline">
+              <span class="status-dot"></span>
+              <span class="status-text">OFF</span>
+            </span>
           </div>
         </div>
+
+        <!-- System Metrics Strip -->
+        <div class="sidebar-metrics" id="sidebar-metrics">
+          <div class="metric" id="metric-model">
+            <span class="metric-label">MODEL</span>
+            <span class="metric-value" id="metric-model-value">—</span>
+          </div>
+          <div class="metric" id="metric-backend">
+            <span class="metric-label">RUNTIME</span>
+            <span class="metric-value" id="metric-backend-value">cpu</span>
+          </div>
+          <div class="metric" id="metric-ctx">
+            <span class="metric-label">CTX</span>
+            <span class="metric-value" id="metric-ctx-value">—</span>
+          </div>
+          <div class="metric" id="metric-layers">
+            <span class="metric-label">GPU</span>
+            <span class="metric-value" id="metric-layers-value">0</span>
+          </div>
+        </div>
+
+        <!-- Unload Model Button (shown when model is loaded) -->
+        <button id="unload-model-btn" class="unload-btn" style="display:none">
+          <i data-lucide="circle-off" class="icon-sm"></i>
+          <span>Unload Model</span>
+          <span class="unload-hint">Free VRAM</span>
+        </button>
+
+        <button id="new-chat" class="new-chat-btn">
+          <i data-lucide="plus" class="icon-sm"></i>
+          New Chat
+        </button>
+
+        <button id="knowledge-tab-btn" class="sidebar-tab-btn">
+          <i data-lucide="brain" class="icon-sm"></i>
+          Knowledge
+        </button>
+
+        <div class="sidebar-divider"></div>
+
         <div id="chat-list" class="chat-list"></div>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-footer-stats">
+            <span id="sidebar-chat-count">0 chats</span>
+            <span>·</span>
+            <span id="sidebar-model-count">0 models</span>
+          </div>
+          <button id="open-settings-btn" class="sidebar-footer-btn">
+            <i data-lucide="terminal" class="icon-sm"></i>
+            Settings
+          </button>
+        </div>
       </aside>
 
+      <!-- Main Chat Area -->
       <main class="main-panel">
-        <section class="settings-panel">
-          <h2>Server & Inference</h2>
-          <div class="form-grid compact-settings">
-            <label>model path<input id="model_path" /></label>
-            <label>candidate models<select id="candidate_models"></select></label>
-            <label>model presets<select id="model_presets"></select></label>
-            <label>temperature<input id="temperature" type="number" step="0.01" /></label>
-            <label>top p<input id="top_p" type="number" step="0.01" /></label>
-            <label>top k<input id="top_k" type="number" /></label>
-            <label>max tokens<input id="max_tokens" type="number" /></label>
-          </div>
-          <div class="actions">
-            <button id="save-config">Save Config</button>
-            <button id="apply-model-preset">Apply Preset</button>
-            <button id="load-model-preset">Load Preset</button>
-            <span id="status-text"></span>
-          </div>
-          <details class="settings-collapse">
-            <summary>Advanced Runtime</summary>
-            <div class="form-grid advanced-settings">
-              <label>llama binary<input id="llama_binary" /></label>
-              <label>cpu mask<input id="cpu_mask" placeholder="4-7" /></label>
-              <label>llama host<input id="llama_host" /></label>
-              <label>llama port<input id="llama_port" type="number" /></label>
-              <label>ctx size<input id="ctx_size" type="number" /></label>
-              <label>threads<input id="threads" type="number" /></label>
-              <label>gpu layers<input id="gpu_layers" type="number" /></label>
-              <label>parallel<input id="parallel" type="number" /></label>
-              <label>batch size<input id="batch_size" type="number" /></label>
-              <label>ubatch size<input id="ubatch_size" type="number" /></label>
-              <label>min p<input id="min_p" type="number" step="0.01" /></label>
-              <label>repeat penalty<input id="repeat_penalty" type="number" step="0.01" /></label>
-              <label>presence penalty<input id="presence_penalty" type="number" step="0.01" /></label>
-              <label class="full">custom args<input id="custom_args" /></label>
-              <label class="full">system prompt<textarea id="system_prompt" rows="3"></textarea></label>
+
+        <!-- Knowledge Panel -->
+        <div id="knowledge-panel" class="knowledge-panel hidden">
+          <div class="knowledge-header">
+            <div class="knowledge-header-left">
+              <button id="knowledge-back-btn" class="icon-btn" title="Back to chat">
+                <i data-lucide="arrow-left" class="icon-md"></i>
+              </button>
+              <div>
+                <div class="knowledge-title">Knowledge Base</div>
+                <div class="knowledge-subtitle">Search your AI conversation history</div>
+              </div>
             </div>
-          </details>
-          <div class="subpanel-grid">
-            <div class="subpanel">
-              <div class="subpanel-header">
-                <h3>Model Library</h3>
-                <div class="inline-actions">
-                  <button id="refresh-models">Refresh</button>
-                  <button id="load-selected-model">Load Selected</button>
+            <div class="knowledge-header-actions">
+              <button id="knowledge-clear-btn" class="btn btn-ghost btn-sm" title="Clear all knowledge data">
+                <i data-lucide="trash-2" class="icon-xs"></i>
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Strip -->
+          <div class="knowledge-stats" id="knowledge-stats">
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-sources">0</span>
+              <span class="kstat-label">Sources</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-records">0</span>
+              <span class="kstat-label">Records</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-chunks">0</span>
+              <span class="kstat-label">Chunks</span>
+            </div>
+            <div class="kstat">
+              <span class="kstat-value" id="kstat-embedded">0</span>
+              <span class="kstat-label">Embedded</span>
+            </div>
+          </div>
+
+          <!-- Search -->
+          <div class="knowledge-search">
+            <div class="knowledge-search-bar">
+              <i data-lucide="search" class="icon-sm"></i>
+              <input id="knowledge-search-input" type="text" placeholder="Search your AI conversations…" />
+              <label class="knowledge-toggle">
+                <input type="checkbox" id="knowledge-use-vectors" checked />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Vectors</span>
+              </label>
+              <button id="knowledge-search-btn" class="btn btn-primary btn-sm">
+                <i data-lucide="search" class="icon-xs"></i>
+                Search
+              </button>
+            </div>
+          </div>
+
+          <!-- Search Results -->
+          <div id="knowledge-results" class="knowledge-results">
+            <div class="knowledge-empty-state">
+              <i data-lucide="brain" style="width:48px;height:48px;color:var(--text-tertiary);"></i>
+              <div class="knowledge-empty-title">No results yet</div>
+              <div class="knowledge-empty-subtitle">Search across your indexed AI conversations, or ingest new sources below.</div>
+            </div>
+          </div>
+
+          <!-- Sources Section -->
+          <div class="knowledge-section">
+            <div class="knowledge-section-header">
+              <h3>
+                <i data-lucide="folder-search" class="icon-sm"></i>
+                Discovered Sources
+              </h3>
+              <button id="knowledge-refresh-sources" class="btn btn-ghost btn-sm">
+                <i data-lucide="refresh-cw" class="icon-xs"></i>
+                Refresh
+              </button>
+            </div>
+            <div id="knowledge-sources-list" class="knowledge-sources-list">
+              <div class="knowledge-empty-hint">Loading sources…</div>
+            </div>
+          </div>
+
+          <!-- Embed Section -->
+          <div class="knowledge-section">
+            <div class="knowledge-section-header">
+              <h3>
+                <i data-lucide="layers" class="icon-sm"></i>
+                Generate Embeddings
+              </h3>
+              <span id="knowledge-embed-status" class="kstat-label">Requires running server</span>
+            </div>
+            <div class="knowledge-embed-controls">
+              <button id="knowledge-embed-btn" class="btn btn-primary btn-sm" disabled>
+                <i data-lucide="cpu" class="icon-xs"></i>
+                Embed Pending Chunks
+              </button>
+              <span id="knowledge-embed-progress" class="knowledge-embed-progress"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-panel" id="chat-panel">
+          <!-- Chat Header -->
+          <div class="chat-header">
+            <div class="chat-header-left">
+              <button id="toggle-sidebar" class="icon-btn mobile-only" title="Toggle sidebar">
+                <i data-lucide="panel-left" class="icon-md"></i>
+              </button>
+              <div>
+                <div id="chat-title" class="chat-title">New Chat</div>
+                <div class="chat-model-strip">
+                  <span id="loaded-model-name" class="model-badge unloaded">No model loaded</span>
+                  <span id="loaded-model-meta" class="model-meta"></span>
                 </div>
               </div>
-              <div id="model-library" class="model-library"></div>
             </div>
-            <div class="subpanel">
-              <div class="subpanel-header">
-                <h3>Download GGUF</h3>
-              </div>
-              <div class="form-grid compact-grid">
-                <label class="full">url<input id="download_url" placeholder="https://huggingface.co/.../model.gguf?download=1" /></label>
-                <label class="full">destination path<input id="download_destination" placeholder="~/models/model.gguf" /></label>
-              </div>
-              <div class="actions">
-                <button id="start-download">Start Download</button>
-              </div>
-              <div id="download-jobs" class="download-jobs"></div>
+            <div class="chat-header-right">
+              <button id="settings-btn" class="icon-btn" title="Server settings">
+                <i data-lucide="sliders-horizontal" class="icon-md"></i>
+              </button>
             </div>
           </div>
-        </section>
 
-        <section class="chat-panel">
-          <div class="chat-header">
-            <div id="chat-title" class="chat-title">No chat selected</div>
-            <div class="chat-model-strip">
-              <span class="chat-model-label">Loaded Model</span>
-              <span id="loaded-model-name" class="chat-model-name">Unknown</span>
-              <span id="loaded-model-meta" class="chat-model-meta"></span>
+          <!-- Empty State -->
+          <div id="empty-state" class="empty-state">
+            <div class="empty-logo">
+              <span class="brand-mark" style="width:56px;height:56px;font-size:28px;border-radius:12px;">ll</span>
+            </div>
+            <div class="empty-title">llama-webui</div>
+            <div class="empty-subtitle">
+              Direct llama.cpp control with persistent chats, hardware-aware tuning, and model management.
+            </div>
+            <div class="empty-shortcuts" id="empty-shortcuts">
+              <div class="shortcut-chip" data-action="settings">
+                <i data-lucide="settings" class="icon-sm"></i>
+                Load a model
+              </div>
+              <div class="shortcut-chip" data-action="preset-latency">
+                <i data-lucide="zap" class="icon-sm"></i>
+                Latency smoke test
+              </div>
+              <div class="shortcut-chip" data-action="preset-code">
+                <i data-lucide="code-2" class="icon-sm"></i>
+                Coding check
+              </div>
+              <div class="shortcut-chip" data-action="preset-reason">
+                <i data-lucide="brain" class="icon-sm"></i>
+                Reasoning probe
+              </div>
+            </div>
+            <div class="empty-hint">
+              Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to send a message
             </div>
           </div>
-          <div id="messages" class="messages"></div>
-          <div class="preset-row">
-            <select id="prompt-presets"></select>
-            <button id="apply-preset">Use Preset</button>
-            <button id="run-preset">Run Preset</button>
+
+          <!-- Messages -->
+          <div id="messages" class="messages hidden"></div>
+
+          <!-- Scroll-to-Bottom -->
+          <button id="scroll-bottom" class="scroll-bottom-btn" title="Scroll to bottom">
+            <i data-lucide="chevron-down" class="icon-md"></i>
+          </button>
+
+          <!-- Composer -->
+          <div class="composer-wrapper">
+            <div class="composer">
+              <div class="composer-inner">
+                <textarea id="message-input" rows="1" placeholder="Message llama.cpp…"></textarea>
+                <button id="send-message" class="send-btn" title="Send (Ctrl+Enter)">
+                  <i data-lucide="arrow-up" class="icon-md"></i>
+                </button>
+              </div>
+              <div class="composer-footer">
+                <select id="prompt-presets" class="preset-select"></select>
+                <button id="knowledge-toggle-btn" class="knowledge-toggle-btn" title="Toggle knowledge-augmented generation">
+                  <i data-lucide="brain" class="icon-xs"></i>
+                  <span>Knowledge</span>
+                </button>
+                <div class="composer-actions">
+                  <button id="apply-preset" class="text-btn" title="Insert preset into composer">Insert</button>
+                  <button id="run-preset" class="text-btn" title="Insert and send preset">Run</button>
+                </div>
+                <span class="composer-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+                <span id="chat-status-text" class="chat-status"></span>
+              </div>
+            </div>
           </div>
-          <div class="composer">
-            <textarea id="message-input" rows="4" placeholder="Send a message..."></textarea>
-            <button id="send-message">Send</button>
+        </div>
+
+        <!-- Settings Drawer -->
+        <div id="settings-drawer" class="settings-drawer">
+          <div class="drawer-backdrop" id="drawer-backdrop"></div>
+          <div class="drawer-panel">
+            <div class="drawer-header">
+              <h2>
+                <i data-lucide="settings" class="icon-md"></i>
+                Settings
+              </h2>
+              <button id="close-drawer" class="icon-btn" title="Close settings">
+                <i data-lucide="x" class="icon-md"></i>
+              </button>
+            </div>
+
+            <div class="drawer-body">
+              <!-- Launch Readiness -->
+              <section class="settings-section">
+                <h3>
+                  <i data-lucide="shield-check" class="icon-sm"></i>
+                  Launch Readiness
+                </h3>
+                <div id="preflight-panel" class="preflight-panel">
+                  <div class="preflight-summary">
+                    <span id="preflight-status" class="preflight-status neutral">Not checked</span>
+                    <button id="run-preflight" class="btn btn-secondary btn-sm">
+                      <i data-lucide="scan" class="icon-xs"></i>
+                      Check Now
+                    </button>
+                  </div>
+                  <div id="preflight-checks" class="preflight-checks"></div>
+                  <div id="preflight-warnings" class="preflight-warnings"></div>
+                </div>
+              </section>
+
+              <!-- Server Control -->
+              <section class="settings-section">
+                <div class="section-header">
+                  <h3>
+                    <i data-lucide="server" class="icon-sm"></i>
+                    Server Control
+                  </h3>
+                  <div class="server-actions">
+                    <button id="start-server" class="btn btn-primary btn-sm">
+                      <i data-lucide="play" class="icon-xs"></i>
+                      Start
+                    </button>
+                    <button id="stop-server" class="btn btn-ghost btn-sm">
+                      <i data-lucide="square" class="icon-xs"></i>
+                      Stop
+                    </button>
+                  </div>
+                </div>
+                <div id="status-text" class="status-message"></div>
+              </section>
+
+              <!-- Model Selection -->
+              <section class="settings-section">
+                <h3>
+                  <i data-lucide="box" class="icon-sm"></i>
+                  Model
+                </h3>
+                <div class="field-grid">
+                  <div class="field span-full">
+                    <label for="model_path">Model Path</label>
+                    <input id="model_path" placeholder="/path/to/model.gguf" />
+                  </div>
+                  <div class="field">
+                    <label for="model_presets">Saved Preset</label>
+                    <select id="model_presets"></select>
+                  </div>
+                  <div class="field">
+                    <label for="candidate_models">Scanned Models</label>
+                    <select id="candidate_models"></select>
+                  </div>
+                  <div class="field-actions span-full">
+                    <button id="apply-model-preset" class="btn btn-secondary btn-sm">
+                      <i data-lucide="sliders-horizontal" class="icon-xs"></i>
+                      Apply Preset
+                    </button>
+                    <button id="load-model-preset" class="btn btn-primary btn-sm">
+                      <i data-lucide="download" class="icon-xs"></i>
+                      Load Preset
+                    </button>
+                    <button id="load-selected-model" class="btn btn-secondary btn-sm">
+                      <i data-lucide="upload" class="icon-xs"></i>
+                      Load Selected
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Runtime Mode -->
+              <section class="settings-section">
+                <h3>
+                  <i data-lucide="cpu" class="icon-sm"></i>
+                  Runtime
+                </h3>
+                <div class="field-grid">
+                  <div class="field">
+                    <label for="runtime_mode">Mode</label>
+                    <select id="runtime_mode">
+                      <option value="local">Single PC</option>
+                      <option value="rpc">RPC Split</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="max_tokens">Max Tokens</label>
+                    <input id="max_tokens" type="number" />
+                  </div>
+                </div>
+                <div class="mode-notes">
+                  <div id="local-mode-note" class="mode-note active">
+                    <strong>Single Host</strong>
+                    <span>Full model runs locally via one llama-server process.</span>
+                  </div>
+                  <div id="rpc-mode-note" class="mode-note">
+                    <strong>RPC Split</strong>
+                    <span>Offloads layers to a remote rpc-server endpoint.</span>
+                  </div>
+                </div>
+
+                <div id="browser-section" class="browser-section">
+                  <div class="browser-header">
+                    <div>
+                      <div class="browser-title">Browser Inference</div>
+                      <div class="browser-subtitle">Run a small WebLLM model locally through WebGPU without starting llama-server.</div>
+                    </div>
+                    <span id="browser-mode-badge" class="health-badge neutral">WebGPU check pending</span>
+                  </div>
+                  <div class="browser-controls">
+                    <button id="init-browser" type="button" class="btn btn-secondary btn-sm">
+                      <i data-lucide="monitor-up" class="icon-xs"></i>
+                      Enable
+                    </button>
+                    <select id="browser-model-select" disabled>
+                      <option value="">Choose a browser model...</option>
+                    </select>
+                    <button id="load-browser-model" type="button" class="btn btn-primary btn-sm" disabled>
+                      <i data-lucide="download" class="icon-xs"></i>
+                      Load
+                    </button>
+                  </div>
+                  <div id="browser-status" class="browser-status">Waiting for WebGPU capability check.</div>
+                </div>
+
+                <!-- RPC Config (shown when RPC mode selected) -->
+                <div id="rpc-guide" class="rpc-section" hidden>
+                  <div class="rpc-header">
+                    <div>
+                      <div class="rpc-title">Remote RPC Device</div>
+                      <div class="rpc-subtitle">Run rpc-server on any reachable llama.cpp host before loading a model.</div>
+                    </div>
+                    <div class="rpc-header-actions">
+                      <span id="rpc-health" class="health-badge neutral">Not checked</span>
+                      <button id="check-rpc" type="button" class="btn btn-secondary btn-sm">
+                        <i data-lucide="wifi" class="icon-xs"></i>
+                        Check
+                      </button>
+                    </div>
+                  </div>
+                  <div class="field-grid">
+                    <div class="field span-2">
+                      <label for="rpc_host">RPC Host</label>
+                      <input id="rpc_host" placeholder="rpc-worker.local or 192.0.2.20" />
+                    </div>
+                    <div class="field">
+                      <label for="rpc_port">Port</label>
+                      <input id="rpc_port" type="number" />
+                    </div>
+                    <div class="field span-full">
+                      <label for="rpc_tensor_split">Tensor Split</label>
+                      <input id="rpc_tensor_split" placeholder="optional, e.g. 50,50" />
+                    </div>
+                  </div>
+                  <div class="rpc-command-block">
+                    <div class="rpc-command-label">Command to run on the remote host:</div>
+                    <div class="rpc-command-row">
+                      <code id="rpc-guide-command">rpc-server.exe -H 0.0.0.0 -p 50052 -c</code>
+                      <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('rpc-guide-command').textContent)" title="Copy command">
+                        <i data-lucide="copy" class="icon-xs"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="rpc-checklist">
+                    <span><i data-lucide="check-circle" class="icon-xs"></i> Compatible llama.cpp build</span>
+                    <span><i data-lucide="check-circle" class="icon-xs"></i> Remote accelerator visible</span>
+                    <span><i data-lucide="check-circle" class="icon-xs"></i> Firewall allows TCP port</span>
+                    <span><i data-lucide="check-circle" class="icon-xs"></i> Split tuned per device VRAM</span>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Sampling -->
+              <details class="settings-section collapsible">
+                <summary>
+                  <h3>
+                    <i data-lucide="thermometer" class="icon-sm"></i>
+                    Sampling
+                  </h3>
+                  <i data-lucide="chevron-down" class="icon-sm collapse-icon"></i>
+                </summary>
+                <div class="field-grid">
+                  <div class="field">
+                    <label for="temperature">Temperature</label>
+                    <input id="temperature" type="number" step="0.01" />
+                  </div>
+                  <div class="field">
+                    <label for="top_p">Top P</label>
+                    <input id="top_p" type="number" step="0.01" />
+                  </div>
+                  <div class="field">
+                    <label for="top_k">Top K</label>
+                    <input id="top_k" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="min_p">Min P</label>
+                    <input id="min_p" type="number" step="0.01" />
+                  </div>
+                  <div class="field">
+                    <label for="repeat_penalty">Repeat Penalty</label>
+                    <input id="repeat_penalty" type="number" step="0.01" />
+                  </div>
+                  <div class="field">
+                    <label for="presence_penalty">Presence Penalty</label>
+                    <input id="presence_penalty" type="number" step="0.01" />
+                  </div>
+                </div>
+              </details>
+
+              <!-- Advanced Runtime -->
+              <details class="settings-section collapsible">
+                <summary>
+                  <h3>
+                    <i data-lucide="wrench" class="icon-sm"></i>
+                    Advanced Runtime
+                  </h3>
+                  <i data-lucide="chevron-down" class="icon-sm collapse-icon"></i>
+                </summary>
+                <div class="field-grid">
+                  <div class="field span-full">
+                    <label for="llama_binary">Llama Binary</label>
+                    <input id="llama_binary" />
+                  </div>
+                  <div class="field">
+                    <label for="cpu_mask">CPU Mask</label>
+                    <input id="cpu_mask" placeholder="4-7" />
+                  </div>
+                  <div class="field">
+                    <label for="llama_host">Host</label>
+                    <input id="llama_host" />
+                  </div>
+                  <div class="field">
+                    <label for="llama_port">Port</label>
+                    <input id="llama_port" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="ctx_size">Context Size</label>
+                    <input id="ctx_size" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="threads">Threads</label>
+                    <input id="threads" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="gpu_layers">GPU Layers</label>
+                    <input id="gpu_layers" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="parallel">Parallel</label>
+                    <input id="parallel" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="batch_size">Batch Size</label>
+                    <input id="batch_size" type="number" />
+                  </div>
+                  <div class="field">
+                    <label for="ubatch_size">UBatch Size</label>
+                    <input id="ubatch_size" type="number" />
+                  </div>
+                  <div class="field span-full">
+                    <label for="custom_args">Custom Args</label>
+                    <input id="custom_args" />
+                  </div>
+                  <div class="field span-full">
+                    <label for="system_prompt">System Prompt</label>
+                    <textarea id="system_prompt" rows="3"></textarea>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Model Library & Downloads -->
+              <details class="settings-section collapsible">
+                <summary>
+                  <h3>
+                    <i data-lucide="library" class="icon-sm"></i>
+                    Model Library & Downloads
+                  </h3>
+                  <i data-lucide="chevron-down" class="icon-sm collapse-icon"></i>
+                </summary>
+                <div class="library-grid">
+                  <div class="library-panel">
+                    <div class="library-panel-header">
+                      <span class="library-panel-title">Discovered Models</span>
+                      <button id="refresh-models" class="btn btn-ghost btn-sm">
+                        <i data-lucide="refresh-cw" class="icon-xs"></i>
+                        Refresh
+                      </button>
+                    </div>
+                    <div id="model-library" class="model-library"></div>
+                  </div>
+                  <div class="library-panel">
+                    <div class="library-panel-header">
+                      <span class="library-panel-title">Download GGUF</span>
+                    </div>
+                    <div class="field-grid compact">
+                      <div class="field span-full">
+                        <label for="download_url">URL</label>
+                        <input id="download_url" placeholder="https://huggingface.co/.../model.gguf?download=1" />
+                      </div>
+                      <div class="field span-full">
+                        <label for="download_destination">Destination</label>
+                        <input id="download_destination" placeholder="~/models/model.gguf" />
+                      </div>
+                      <div class="field-actions span-full">
+                        <button id="start-download" class="btn btn-primary btn-sm">
+                          <i data-lucide="download" class="icon-xs"></i>
+                          Start Download
+                        </button>
+                      </div>
+                    </div>
+                    <div id="download-jobs" class="download-jobs"></div>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Diagnostics -->
+              <details class="settings-section collapsible">
+                <summary>
+                  <h3>
+                    <i data-lucide="file-text" class="icon-sm"></i>
+                    Diagnostics
+                  </h3>
+                  <i data-lucide="chevron-down" class="icon-sm collapse-icon"></i>
+                </summary>
+                <div class="diagnostics-panel">
+                  <div class="diag-section">
+                    <div class="diag-header">Start Error</div>
+                    <pre id="diag-start-error" class="diag-log">No error recorded.</pre>
+                  </div>
+                  <div class="diag-section">
+                    <div class="diag-header">Log Tail (last 80 lines)</div>
+                    <pre id="diag-log-tail" class="diag-log">No log output.</pre>
+                  </div>
+                  <div class="diag-section">
+                    <div class="diag-header">Diagnoses</div>
+                    <div id="diag-diagnoses" class="diag-diagnoses">No issues found.</div>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Save Config -->
+              <section class="settings-section settings-footer-section">
+                <div class="field-actions">
+                  <button id="save-config" class="btn btn-primary">
+                    <i data-lucide="save" class="icon-xs"></i>
+                    Save Config
+                  </button>
+                </div>
+              </section>
+            </div>
           </div>
-          <div class="chat-status-row">
-            <span id="chat-status-text"></span>
-          </div>
-        </section>
+        </div>
       </main>
     </div>
 
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <script src="/static/vendor/markdown-it.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=ux-v2-20260511-kb"></script>
   </body>
 </html>

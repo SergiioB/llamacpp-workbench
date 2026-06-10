@@ -1,14 +1,14 @@
 [project]
 name = "llama-webui"
 version = "0.1.0"
-description = "Standalone local web UI for llama.cpp with persistent chats, model management, streaming responses, and hardware-aware runtime tuning."
+description = "Standalone local llama.cpp workbench with persistent chats, model management, streaming responses, RPC split serving, and hardware-aware runtime tuning."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Sergio Barrientos", email = "sergio@sergiiob.dev"},
 ]
-keywords = ["llama.cpp", "gguf", "local-llm", "edge-ai", "llm-inference", "rk3588", "llm"]
+keywords = ["llama.cpp", "gguf", "local-llm", "edge-ai", "llm-inference", "rk3588", "radxa", "benchmarking", "webui"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -36,6 +36,12 @@ dev = [
 [project.scripts]
 llama-webui = "llama_webui.main:run"
 hf-discover = "llama_webui.hf_discovery:cli_main"
+
+[project.urls]
+Homepage = "https://github.com/SergiioB/llamacpp-workbench"
+Repository = "https://github.com/SergiioB/llamacpp-workbench"
+Issues = "https://github.com/SergiioB/llamacpp-workbench/issues"
+Documentation = "https://github.com/SergiioB/llamacpp-workbench#readme"
 
 [build-system]
 requires = ["hatchling"]

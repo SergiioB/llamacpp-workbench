@@ -1,33 +1,99 @@
+![llama-webui banner](./assets/readme-banner.svg)
+
 # llama-webui
 
-> Standalone local web UI for `llama.cpp` with persistent chats, model management, streaming responses, and hardware-aware runtime tuning.
+> Remote `llama.cpp` workbench for GGUF models with direct runtime control, persistent chats, RAG knowledge base, RPC split serving, and hardware-aware tuning from RK3588 boards to Windows CUDA systems.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy.readthedocs.io/)
+[![llama.cpp](https://img.shields.io/badge/runtime-llama.cpp-6b46c1.svg)](https://github.com/ggml-org/llama.cpp)
+[![RK3588](https://img.shields.io/badge/tested-RK3588%20%2F%20ROCK%205B%2B-14532d.svg)](./REAP_RK3588_NOTES.md)
 
 ## What This Is
 
-`llama-webui` is a standalone local web interface for `llama.cpp`, intentionally without Ollama. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
+`llama-webui` is a standalone local web interface for `llama.cpp` with no Ollama dependency. Ollama was removed after CVE-2026-7482 (CVSS 9.1) exposed a critical RCE vulnerability. The serving stack is compiled `llama.cpp`, so KV cache quantization, context length, batch sizing, CPU affinity, GPU layer offload, and model-specific flags remain fully controllable.
 
-This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves two purposes:
+This repository started as a board-local control surface for testing REAP-pruned Mixture-of-Experts models on a `Radxa ROCK 5B+` with `Rockchip RK3588`. It now serves three purposes:
 
 - A practical remote web UI for loading and serving local GGUF models with `llama.cpp`
 - A documented benchmark and tuning harness for constrained ARM boards and more capable desktop machines
+- A serious-workload control plane for Windows CUDA hosts, including Windows-to-Windows `llama.cpp` RPC split serving across a LAN
+
+The main point is simple: keep the convenience of a web UI without giving up the flags that decide whether local inference is actually usable.
+
+## What Makes It Different
+
+Many local-AI UIs optimize for convenience first and runtime visibility second. `llama-webui` is deliberately built the other way around.
+
+- It talks to compiled `llama.cpp` directly — no Ollama dependency (removed after CVE-2026-7482).
+- It preserves the flags that actually decide whether a host feels usable:
+  - KV cache type
+  - context window
+  - batch and ubatch sizing
+  - CPU affinity
+  - GPU offload depth
+  - reasoning / no-thinking mode
+- It treats benchmark-backed hardware tuning as a feature, not background trivia.
+- It is intentionally credible on small ARM systems, especially the `Radxa ROCK 5B+` with `RK3588`, not only on desktop GPUs.
+- It supports `llama.cpp` RPC split serving, so one coordinator can combine local and remote compute instead of being limited to a single box.
+
+If you just want a generic chat shell, other tools already cover that. This repo is for people who want a usable web UI without giving up the runtime knobs that explain real behavior.
+
+## Who It Is For
+
+- engineers benchmarking GGUF models on `llama.cpp`
+- people serving models on ARM SBCs, headless Linux hosts, or mixed desktop hardware
+- developers who want a remote control plane for model switching and runtime tuning
+- anyone who needs to compare presets, flags, and model behavior with less guesswork
+
+## Compared To Other Options
+
+### Versus Ollama-based UIs
+
+- Ollama removed after CVE-2026-7482 (CVSS 9.1 critical RCE)
+- more direct control over `llama.cpp` startup flags
+- easier to reason about model-specific tuning and failure modes
+- better fit for benchmarking, profiling, and constrained-hardware tuning
+- no hidden abstraction layer between you and the runtime knobs
+
+### Versus desktop-first local AI tools
+
+- less GPU-desktop assumption baked into the defaults
+- friendlier to SBC and remote-host workflows
+- clearer path to RK3588 and CPU-first tuning
+
+### Versus ad hoc shell scripts
+
+- persistent chats
+- browser control plane
+- model inventory and presets
+- easier inspection of runtime state and configuration
+
+## Why RK3588 Is A First-Class Target
+
+Most local-AI tools talk about ARM boards as a novelty. This repo does not.
+
+- It was shaped around real tuning work on a `Radxa ROCK 5B+`.
+- It exposes the settings that matter on RK3588: context, KV cache quantization, threads, affinity, and no-thinking mode.
+- It carries benchmark-backed presets instead of pretending the same defaults work equally well on laptops, workstations, and SBCs.
+- It is useful when the goal is stable, private local inference on constrained hardware, not just desktop demos.
 
 ## Key Features
 
-- `llama.cpp` only, with no Ollama dependency or hidden abstraction layer
-- **Browser-based inference via WebGPU** -- run models directly in the browser with no server-side llama.cpp needed
+- `llama.cpp` only — Ollama removed after CVE-2026-7482 (CVSS 9.1)
 - Browser-driven model loading and runtime config editing
 - GPU auto-detection for CUDA, ROCm, Metal, and CPU-first profiles
 - Streaming responses via Server-Sent Events
 - Persistent chat history in SQLite
-- Model discovery from configurable GGUF directories (including HuggingFace Hub cache)
-- VRAM estimation and MoE/REAP model detection per model
+- Model discovery from configurable GGUF directories
 - Cross-platform support for ARM SBCs, Linux desktops, NVIDIA GPUs, and Windows CUDA hosts
+- `llama.cpp` RPC split mode for LAN-connected worker machines
+- **Knowledge Base / RAG**: index and search AI conversation history (Pi, Claude Code, Codex, Factory, Qwen Code, OpenCode) with hybrid BM25 + vector retrieval
+- Knowledge-augmented chat: inject retrieved context into model prompts with one toggle
 - RK3588-tested presets for fast daytime use and stronger overnight use
+- explicit no-thinking defaults for interactive serving, plus visible-response sanitation when models leak empty think wrappers anyway
 
 ## Repository Layout
 
@@ -61,6 +127,8 @@ llama-webui/
 │   ├── run_reap_pipeline.sh
 │   └── setup_windows.ps1
 ├── src/llama_webui/
+│   ├── knowledge/        # RAG pipeline (DB, chunker, embedder, retriever, ingest)
+│   └── ...
 └── static/
 ```
 
@@ -116,92 +184,161 @@ See [WINDOWS_SETUP_GUIDE.md](./WINDOWS_SETUP_GUIDE.md) and [SETUP_MISSING_COMPON
 
 Open `http://<host>:8095`.
 
-### Browser Inference (No Server-Side Build Needed)
+## llama.cpp RPC Mode
 
-`llama-webui` can run LLM models **directly in the browser** using WebGPU. No llama.cpp build, no CUDA toolkit, no compiled binaries -- just a browser with a GPU.
+For the exact Windows-to-Windows launch checklist and PowerShell helpers, use
+[docs/rpc-remote-host-runbook.md](./docs/rpc-remote-host-runbook.md).
 
-**Requirements:**
+The WebUI can start `llama-server` either on one machine or with llama.cpp RPC
+offload to another reachable device. In this mode there are two roles:
 
-- Chromium-based browser: Chrome 113+, Edge 113+, or Opera 99+
-- A GPU (NVIDIA, AMD, Apple Silicon, or Intel Arc)
-- The Python FastAPI server running (just to serve the HTML/JS/CSS files)
+- **Coordinator host**: runs `llama-webui` and starts `llama-server`.
+- **RPC worker host**: runs `rpc-server` and exposes one accelerator or CPU
+  backend over TCP.
 
-**How to use:**
+The worker must already be running before the coordinator starts or loads a
+model. The coordinator passes `--rpc <host>:<port>`, `--split-mode layer`, and
+optionally `--tensor-split` to `llama-server`.
 
-```bash
-# Start the server (only serves static files for browser mode)
-source .venv/bin/activate
-llama-webui
+This mode has been validated for real Windows-to-Windows local workloads: a
+Windows desktop coordinator can drive a Windows laptop RPC worker on the same
+LAN, combining CUDA devices while keeping the WebUI as the single control
+surface.
+
+### 1. Prepare the RPC worker
+
+Install or copy a compatible llama.cpp build onto the worker. Use the same
+llama.cpp build as the coordinator when possible; protocol mismatches can fail
+during model load.
+
+On Windows, open PowerShell on the worker:
+
+```powershell
+cd C:\path\to\llama.cpp\bin
+.\rpc-server.exe -H 0.0.0.0 -p 50052 -c
 ```
 
-1. Open `http://localhost:8095` in Chrome/Edge
-2. The sidebar shows a **"Browser Inference (WebGPU)"** panel if WebGPU is available
-3. Click **"Enable Browser Mode"** -- loads the WebLLM engine (~1MB)
-4. Select a model from the dropdown and click **"Load"**
-5. Chat normally -- inference runs on your local GPU via WebGPU
+On Linux, start the equivalent binary from the build directory:
 
-**Available browser models:**
+```bash
+cd /path/to/llama.cpp/build/bin
+./rpc-server -H 0.0.0.0 -p 50052 -c
+```
 
-| Model | Size | Notes |
-|-------|------|-------|
-| SmolLM2 135M | ~100 MB | Instant responses, good for testing |
-| SmolLM2 360M | ~220 MB | Lightweight |
-| Llama 3.2 1B | ~700 MB | Practical quality |
-| Qwen 2.5 1.5B | ~1 GB | Good balance |
-| Qwen 2.5 3B | ~1.8 GB | Solid quality |
-| Phi 3.5 Mini | ~2.3 GB | Microsoft's compact model |
-| Gemma 2 2B | ~1.4 GB | Google's efficient model |
-| Llama 3.2 3B | ~1.8 GB | Strong reasoning |
-| Qwen 2.5 7B | ~4 GB | Needs 8GB+ VRAM |
-| Llama 3.1 8B | ~4.5 GB | Needs 8GB+ VRAM |
+The worker log should print the endpoint, transport, and visible devices. For a
+CUDA worker, also check:
 
-Models are pre-compiled by [MLC AI](https://github.com/mlc-ai/web-llm) into WebGPU shaders. First download is cached in the browser (IndexedDB) -- subsequent loads are instant.
+```powershell
+nvidia-smi
+```
 
-**Remote access:** The server binds to `0.0.0.0:8095` by default, so you can open `http://<machine-IP>:8095` from another device. For example, run the server on an RK3588 board, then open the page from a Windows laptop with an RTX GPU -- the WebGPU inference will run on the laptop's GPU, not the board.
+If the worker has a firewall enabled, allow inbound TCP on the selected port
+(`50052` in the examples). On Windows, the rule can be added from an elevated
+PowerShell:
 
-**When to use which mode:**
+```powershell
+New-NetFirewallRule -DisplayName "llama.cpp RPC 50052" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 50052
+```
 
-- **Browser mode**: Quick testing, no-install setups, privacy-sensitive work, machines without compiled llama.cpp
-- **Server mode** (llama.cpp): Larger models (27B+), fine-grained runtime control, benchmarking, RK3588-tuned presets, custom flags
+Only expose this port on a trusted LAN. llama.cpp RPC is an experimental
+internal transport, not an authenticated public API.
 
-**Browser compatibility:**
+### 2. Configure the WebUI coordinator
 
-| Browser | WebGPU Status |
-|---------|--------------|
-| Chrome 113+ | Enabled by default |
-| Edge 113+ | Enabled by default |
-| Firefox | Behind `dom.webgpu.enabled` flag in `about:config` |
-| Safari | Limited support |
+Open Settings in the WebUI and set:
 
-Check [WebGPU Report](https://webgpureport.org/) to verify your browser's WebGPU support.
+- `Runtime -> Mode`: `RPC Split`
+- `RPC Host`: the worker IP or DNS name, for example `192.168.1.146`
+- `Port`: the worker port, for example `50052`
+- `Tensor Split`: a comma-separated model-weight ratio, for example `34,66`
+
+Then click `Check` in the RPC panel. This verifies TCP reachability before any
+model is loaded.
+
+After the RPC check passes, select a scanned model or preset and press `Start`
+or `Load Preset`. During load, `llama-server` uploads tensors to the worker.
+That upload can take a while and the worker may refuse extra TCP probes while
+the active coordinator connection owns the RPC server. The WebUI treats a
+managed healthy `llama-server` as authoritative instead of re-probing the busy
+RPC port.
+
+### 3. Choose a tensor split
+
+`Tensor Split` is a comma-separated ratio that controls how much model weight is
+placed on each backend. It must match the coordinator device plus each RPC
+device in order.
+
+Examples:
+
+- `50,50`: roughly even split between local GPU and one RPC worker.
+- `34,66`: keep less model weight on a 12 GB display GPU and more on the remote
+  worker.
+- `70,30`: keep more weight local when the worker has less available VRAM.
+
+Tune the split against actual load success, free memory, prompt throughput, and
+token throughput. If the worker OOMs or disconnects during `set_tensor`, reduce
+the worker share or close competing GPU processes on the worker.
+
+RPC mode uses `--split-mode layer`. Layer offload moves activations across the
+network at layer boundaries and is the practical default for normal LAN links.
+The default KV cache policy remains `--flash-attn on --cache-type-k q8_0
+--cache-type-v q8_0` so long-context serving keeps VRAM use predictable.
+
+### Troubleshooting
+
+If `Check RPC` fails before model load, verify:
+
+- the remote `rpc-server` process is running
+- the host/IP and port match the WebUI fields
+- the firewall allows inbound TCP on the RPC port
+- both devices are on the same network or otherwise routable
+- the remote accelerator is visible to its local runtime, for example through
+  `nvidia-smi`, `rocminfo`, `clinfo`, or the vendor tool for that device
+
+If the model starts loading but then the worker logs `recv failed`, restart the
+worker `rpc-server`, stop the local `llama-server`, and try a smaller or more
+conservative split. A half-loaded local `llama-server` can hold VRAM even after
+the RPC worker died; use the WebUI `Stop` button or terminate that process
+before relaunching.
+
+If the model is already loaded and chat works, a direct TCP probe to the worker
+may fail because the active `llama-server` connection is using the RPC server.
+In that state, trust `/api/server/status` or the WebUI server indicator over a
+standalone port probe.
+
+## Recommended RK3588 Defaults
+
+For a `Radxa ROCK 5B+` or other `RK3588` board, the practical interactive baseline is:
+
+- `Qwen3.5-2B` for the fast tier
+- `Qwen3.5-4B` when quality matters more than latency
+- explicit no-thinking flags for chat-style serving
+- `rk-llama.cpp` where available for the better CPU path
+
+The tracked board notes live in [REAP_RK3588_NOTES.md](./REAP_RK3588_NOTES.md).
 
 ## Architecture
 
 ```text
-┌───────────────────────────────────────────────────────────────┐
-│                       Browser (Client)                        │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  llama-webui  │  Chat UI  │  Model Settings  │  Logs   │ │
-│  └────────────────┴──────────┴──────────────────┴─────────┘ │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  Browser Inference (WebGPU)                          │   │
-│  │  @mlc-ai/web-llm  →  WebGPU shaders  →  local GPU   │   │
-│  └──────────────────────────────────────────────────────┘   │
-└──────────┬──────────────────────────────────┬───────────────┘
-           │ HTTP / SSE (server mode)         │ WebGPU (browser mode)
-┌──────────▼──────────────────────────────────┘
-│                     FastAPI Server
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
-│  │ Chat Router  │  │Model Manager │  │Download Manager  │
-│  │   (SSE)      │  │              │  │                  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
-│  │  App State   │  │   Settings   │  │ Model Inventory  │
-│  │  (SQLite)    │  │   (.env)     │  │  + VRAM Est.     │
-│  └──────────────┘  └──────────────┘  └──────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Browser (Client)                       │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  llama-webui  │  Chat UI  │  Model Settings  │ Logs │   │
+│  └───────────────┴───────────┴──────────────────┴──────┘   │
 └────────────────────────────┬────────────────────────────────┘
-                             │ Subprocess / IPC (server mode only)
+                             │ HTTP / SSE
+┌────────────────────────────▼────────────────────────────────┐
+│                     FastAPI Server                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Chat Router  │  │Model Manager │  │Download Manager  │  │
+│  │   (SSE)      │  │              │  │                  │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  App State   │  │   Settings   │  │ Model Inventory  │  │
+│  │  (SQLite)    │  │   (.env)     │  │                  │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└────────────────────────────┬────────────────────────────────┘
+                             │ Subprocess / IPC
 ┌────────────────────────────▼────────────────────────────────┐
 │                    llama.cpp (Binary)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
@@ -223,6 +360,7 @@ Supported variables:
 - `LLAMA_WEBUI_DEFAULT_DOWNLOAD_DIR`
 - `LLAMA_WEBUI_LLAMA_SERVER`
 - `LLAMA_WEBUI_LLAMA_CLI`
+- `LLAMA_WEBUI_KNOWLEDGE_SOURCES`
 
 See [.env.example](./.env.example) for concrete examples.
 
@@ -232,6 +370,7 @@ Default behavior without overrides:
 - Model search roots: `./models` and `~/models`
 - Default download target: first existing model root, otherwise `./models`
 - `llama-server` and `llama-cli`: resolved from env, then `PATH`, then common local build locations under `third_party/llama.cpp`
+- Knowledge source paths: auto-discovered from `~/.pi`, `~/.claude`, `~/.codex`, `~/.factory`, `~/.local/share/opencode`, `~/.qwen/projects`
 
 ## Building llama.cpp
 
@@ -341,7 +480,7 @@ The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ub
 - Architecture: `aarch64`
 - Total cores: `8`
 - RAM class: about `24 GiB`
-- Tested models: `GLM-4.7-Flash-REAP-23B-A3B`, `Qwen3.5-4B`
+- Tested models: `GLM-4.7-Flash-REAP-23B-A3B`, `Qwen3.5-2B`, `Qwen3.5-4B`, `Qwen3.5-9B`
 
 ### Windows Desktop / Laptop
 
@@ -361,6 +500,13 @@ The detected backend affects default `gpu_layers`, `parallel`, `batch_size`, `ub
 - Access: Tailscale, sleeps 01:00-07:30
 - Tested models: `Qwen3.6-35B-A3B` (IQ3_XXS), `GLM-4.7-REAP-23B` (IQ4_XS), `Qwen3-27B` (Q4_K_M)
 
+### Windows-to-Windows RPC
+
+- Coordinator: Windows desktop running `llama-webui` and `llama-server`
+- Worker: Windows laptop running `rpc-server`
+- Transport: trusted LAN TCP with `--rpc`, `--split-mode layer`, and tuned `--tensor-split`
+- Workload class: serious interactive local inference, not only toy demos
+
 See [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md) and [docs/hardware-portability.md](./docs/hardware-portability.md).
 
 ## Hardware Scope
@@ -377,6 +523,40 @@ Although validation is strongest on the ROCK 5B+, the project is not ARM-only. T
 What changes per machine is not the app architecture, but the runtime tuning: `gpu_layers`, `ctx_size`, `threads`, `parallel`, `batch_size`, `ubatch_size`, and custom `llama.cpp` flags.
 
 ## Best Configurations We Found
+
+### Best interactive quality-per-size on RK3588
+
+Model:
+
+- `GLM-4.7-Flash-REAP-23B-A3B-Q3_K_M.gguf`
+
+Validated settings:
+
+- CPU affinity: `4-7`
+- Threads: `4`
+- Parallel: `1`
+- Context: `202752`
+- Batch size: `128`
+- KV cache quantization: `--cache-type-k q8_0 --cache-type-v q4_0`
+- Thinking disabled: `--reasoning off --reasoning-budget 0 --reasoning-format none`
+
+### Fast daytime fallback
+
+- `Qwen3.5-2B-Q4_K_M.gguf`
+
+Reason:
+
+- Best measured latency / throughput balance for interactive RK3588 CPU use
+- Strong enough for chat, light coding, and day-to-day local work
+
+### Slower but stronger Qwen quality tier
+
+- `Qwen3.5-4B-Q4_K_M.gguf`
+
+Reason:
+
+- Slower than 2B on RK3588, but structurally better on harder prompts
+- Better treated as a quality tier than as the universal default
 
 ### RX 7800 XT 16GB — MoE 35B at 128K context
 
@@ -424,32 +604,6 @@ Context ceiling on 16GB:
 - MoE 35B/3B: comfortable at 128K
 - MoE 26B/A4B (e.g. Gemma-4-26B-A4B): 256K possible with IQ2_M + Q4_0 KV
 
-### Best interactive quality-per-size on RK3588
-
-Model:
-
-- `GLM-4.7-Flash-REAP-23B-A3B-Q3_K_M.gguf`
-
-Validated settings:
-
-- CPU affinity: `4-7`
-- Threads: `4`
-- Parallel: `1`
-- Context: `202752`
-- Batch size: `128`
-- KV cache quantization: `--cache-type-k q8_0 --cache-type-v q4_0`
-- Thinking disabled: `--reasoning-budget 0 --reasoning-format none`
-
-### Fast daytime fallback
-
-- `Qwen3.5-4B-Q4_K_M.gguf`
-
-Reason:
-
-- Much lighter footprint
-- Faster and more reliable for interactive use
-- Still coherent enough for day-to-day local work
-
 ## What We Learned
 
 ### On AMD RDNA3 / ROCm
@@ -466,6 +620,7 @@ Reason:
 - Disabling reasoning scratchpad improved interactive latency materially on RK3588
 - KV cache quantization mattered enough to keep enabled by default
 - On this board, the best interactive profile came from better runtime tuning, not from enabling more model thinking
+- Even with reasoning disabled server-side, some models can still leak empty `<think>` wrappers, so user-visible response sanitation is still worth keeping
 
 ## Current Status
 
@@ -475,15 +630,15 @@ Reason:
 | Persistent chats | ✅ Production-ready |
 | Model scanning/loading | ✅ Production-ready |
 | Streaming responses | ✅ Production-ready |
-| Browser inference (WebGPU) | ✅ Available |
-| VRAM estimation per model | ✅ Available |
-| MoE / REAP model detection | ✅ Available |
 | Benchmark helpers | ✅ Production-ready |
+| Windows-to-Windows RPC split serving | ✅ Validated |
 | RK3588-tuned presets | ✅ Production-ready |
 | ROCm/RX 7800 XT presets | ✅ Production-ready |
 | Windows setup flow | ✅ Available |
-| Corpus ingestion | 🔜 Planned |
-| Retrieval/memory pages | 🔜 Planned |
+| Knowledge Base / RAG | ✅ Available |
+| Knowledge-augmented chat | ✅ Available |
+| Corpus ingestion (multi-source) | ✅ Available |
+| Retrieval / memory pages | 🔜 Planned |
 | Personalized REAP build | 🔜 Planned |
 
 ## Contributing
@@ -504,8 +659,6 @@ MIT
 ## Related Links
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp)
-- [WebLLM (browser inference)](https://github.com/mlc-ai/web-llm)
-- [WebGPU Report](https://webgpureport.org/)
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/rk3588-benchmarks.md](./docs/rk3588-benchmarks.md)
 - [GLM-4.7-Flash-REAP-23B-A3B on Hugging Face](https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B)

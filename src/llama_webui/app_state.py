@@ -2,13 +2,61 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import shlex
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
 
 from .model_inventory import list_candidate_models, normalize_model_path
-from .settings import GPU_BACKEND, data_dir, resolve_llama_server_binary
+from .settings import GPU_BACKEND, IS_RK3588, data_dir, resolve_llama_server_binary
+
+Q8_KV_ARGS = "--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0"
+_KV_ARG_FLAGS = {"--flash-attn", "-fa", "--cache-type-k", "-ctk", "--cache-type-v", "-ctv"}
+_LEGACY_RPC_HOST = "192.0.2.60"
+_LEGACY_RPC_SPLIT = "34,66"
+
+
+def _normalize_q8_kv_args(custom_args: str | None) -> str:
+    tokens = shlex.split(str(custom_args or ""))
+    filtered: list[str] = []
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        flag = token.split("=", 1)[0]
+        if flag in _KV_ARG_FLAGS:
+            skip_next = "=" not in token
+            continue
+        filtered.append(token)
+    filtered.extend(shlex.split(Q8_KV_ARGS))
+    return shlex.join(filtered)
+
+
+def _normalize_rpc_config(config: dict[str, Any]) -> None:
+    if str(config.get("runtime_mode") or "local").strip().lower() != "local":
+        return
+    if str(config.get("rpc_host") or "").strip() == _LEGACY_RPC_HOST:
+        config["rpc_host"] = ""
+    if str(config.get("rpc_tensor_split") or "").strip() == _LEGACY_RPC_SPLIT:
+        config["rpc_tensor_split"] = ""
+
+
+def _rk3588_custom_args() -> str:
+    if IS_RK3588:
+        return _normalize_q8_kv_args("--reasoning off --reasoning-budget 0 --reasoning-format none")
+    return Q8_KV_ARGS
+
+
+def _platform_custom_args() -> str:
+    """Return platform-appropriate custom args."""
+    if IS_RK3588:
+        return _rk3588_custom_args()
+    if platform.system() == "Windows":
+        return Q8_KV_ARGS
+    return _rk3588_custom_args()
 
 
 def default_config() -> dict[str, Any]:
@@ -19,14 +67,19 @@ def default_config() -> dict[str, Any]:
     parallel = 4 if GPU_BACKEND == "cuda" else 1
     batch_size = 512 if GPU_BACKEND == "cuda" else 128
     ubatch_size = 128 if GPU_BACKEND == "cuda" else 32
+    cpu_mask = "4-7" if IS_RK3588 else ""
     return {
         "bind_host": "0.0.0.0",
         "bind_port": 8095,
         "llama_host": "127.0.0.1",
         "llama_port": 8085,
+        "runtime_mode": "local",
+        "rpc_host": "",
+        "rpc_port": 50052,
+        "rpc_tensor_split": "",
         "llama_binary": resolve_llama_server_binary(),
         "model_path": normalize_model_path(None, candidates),
-        "cpu_mask": "4-7",
+        "cpu_mask": cpu_mask,
         "ctx_size": 2048,
         "threads": cpu_threads,
         "gpu_layers": gpu_layers,
@@ -41,7 +94,7 @@ def default_config() -> dict[str, Any]:
         "presence_penalty": 0.0,
         "max_tokens": 512,
         "system_prompt": "",
-        "custom_args": "--cache-type-k q8_0 --cache-type-v q4_0 --reasoning-budget 0 --reasoning-format none",
+        "custom_args": _platform_custom_args(),
     }
 
 
@@ -88,22 +141,35 @@ class AppState:
                 );
                 """
             )
-            if self._conn.execute("SELECT 1 FROM app_state WHERE key = 'config'").fetchone() is None:
+            if (
+                self._conn.execute("SELECT 1 FROM app_state WHERE key = 'config'").fetchone()
+                is None
+            ):
                 self.save_config(DEFAULT_CONFIG)
             self._conn.commit()
 
     def get_config(self) -> dict[str, Any]:
         with self._lock:
-            row = self._conn.execute("SELECT value_json FROM app_state WHERE key = 'config'").fetchone()
+            row = self._conn.execute(
+                "SELECT value_json FROM app_state WHERE key = 'config'"
+            ).fetchone()
         if not row:
             return dict(DEFAULT_CONFIG)
         data = {**DEFAULT_CONFIG, **json.loads(row["value_json"])}
-        data["model_path"] = normalize_model_path(str(data.get("model_path") or ""), list_candidate_models())
+        data["model_path"] = normalize_model_path(
+            str(data.get("model_path") or ""), list_candidate_models()
+        )
+        data["custom_args"] = _normalize_q8_kv_args(str(data.get("custom_args") or ""))
+        _normalize_rpc_config(data)
         return data
 
     def save_config(self, config: dict[str, Any]) -> dict[str, Any]:
         merged = {**DEFAULT_CONFIG, **config}
-        merged["model_path"] = normalize_model_path(str(merged.get("model_path") or ""), list_candidate_models())
+        merged["model_path"] = normalize_model_path(
+            str(merged.get("model_path") or ""), list_candidate_models()
+        )
+        merged["custom_args"] = _normalize_q8_kv_args(str(merged.get("custom_args") or ""))
+        _normalize_rpc_config(merged)
         payload = json.dumps(merged, ensure_ascii=False)
         with self._lock:
             self._conn.execute(
@@ -145,7 +211,9 @@ class AppState:
 
     def rename_chat_if_placeholder(self, chat_id: int, first_user_message: str) -> None:
         with self._lock:
-            row = self._conn.execute("SELECT title FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
+            row = self._conn.execute(
+                "SELECT title FROM chats WHERE chat_id = ?", (chat_id,)
+            ).fetchone()
         if not row:
             return
         title = str(row["title"] or "").strip()
@@ -165,7 +233,9 @@ class AppState:
                 "INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)",
                 (chat_id, role, content),
             )
-            self._conn.execute("UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?", (chat_id,))
+            self._conn.execute(
+                "UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?", (chat_id,)
+            )
             self._conn.commit()
         return {
             "message_id": cur.lastrowid,
@@ -196,6 +266,15 @@ class AppState:
             **dict(chat),
             "messages": [dict(row) for row in messages],
         }
+
+    def rename_chat(self, chat_id: int, title: str) -> None:
+        safe_title = title.strip()[:120] or "New chat"
+        with self._lock:
+            self._conn.execute(
+                "UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+                (safe_title, chat_id),
+            )
+            self._conn.commit()
 
     def delete_chat(self, chat_id: int) -> None:
         with self._lock:

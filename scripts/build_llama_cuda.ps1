@@ -50,13 +50,14 @@ $prereqsOk = (Test-Prerequisite "CMake" "cmake") -and $prereqsOk
 
 # Check for CUDA
 $cudaPath = $env:CUDA_PATH
-if (-not $cudaPath) {
-    $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
-    if (-not (Test-Path $cudaPath)) {
-        $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6"
-    }
-    if (-not (Test-Path $cudaPath)) {
-        $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
+if (-not $cudaPath -or -not (Test-Path $cudaPath)) {
+    $cudaBase = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    if (Test-Path $cudaBase) {
+        # Find the latest installed CUDA version automatically
+        $cudaPath = Get-ChildItem $cudaBase -Directory |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { $_.FullName }
     }
 }
 
